@@ -1,540 +1,447 @@
-import colorsys
-import os
-import random
-
-import cv2
-import matplotlib.pyplot as plt
-import numpy as np
-from matplotlib.gridspec import GridSpec
+# Librerie per l'elaborazione delle immagini
 from PIL import Image
+import numpy as np
+
+# Librerie per il machine learning
 from sklearn.cluster import KMeans
+from scipy.spatial import distance
+
+# Librerie per la visualizzazione dei dati
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from matplotlib.ticker import AutoMinorLocator, MaxNLocator
+from matplotlib.colors import ListedColormap
+import matplotlib.patches as mpatches
+
+# Altre librerie
+from collections import Counter
+import os
 
 
+# aggiungi una caratteristica tipo nome file (Senza estensione) in modo da usarlo per salvare tutti i grafici
 class ImageCluster:
     """
-    Class to cluster an image based on its colors.
+    This class provides methods to perform color clustering on an image.
+    The image can be provided as a file path or as a PIL.Image object.
     """
 
     def __init__(self, image_input):
         """
-        Initialize the ImageCluster object.
-
-        Args:
-            image_input (str or numpy.ndarray): Path to the image file or the image itself.
+        Initializes the ImageCluster object.
+        If image_input is a string, it is treated as a file path and the image is loaded from that path.
+        If image_input is an instance of PIL.Image, it is used directly.
         """
-        self.image = self.load_image(image_input)
-        self.clustered_image = None
-        self.cluster_centers = None
-        self.cluster_labels = None
-        self.cluster_counts = None
-        self.cluster_percentages = None
-        self.cluster_info = None
-
-    def load_image(self, input):
-        """
-        Load an image from a file or directly from a numpy array.
-
-        Args:
-            input (str or numpy.ndarray): Path to the image file or the image itself.
-
-        Returns:
-            numpy.ndarray: Loaded image.
-        """
-        if isinstance(input, str):
-            return np.array(Image.open(input))
-        elif isinstance(input, np.ndarray):
-            return input
+        if isinstance(image_input, str):
+            self.image_path = image_input
+            self.filename = os.path.splitext(os.path.basename(self.image_path))[0]
+            self.img = Image.open(self.image_path).convert("RGBA")
+        elif isinstance(image_input, Image.Image):
+            self.img = image_input.convert("RGBA")
+            self.filename = "image"
         else:
-            raise ValueError("Invalid input type. Must be a string or a numpy array.")
+            raise TypeError(
+                "image_input deve essere un percorso dell'immagine o un'istanza di PIL.Image"
+            )
+        self.n_clusters = None
+        self.initial_clusters = None
+        self.img_array = np.array(self.img)
+        self.data = self.img_array.reshape(-1, 4)
+        self.data = self.data.astype(float)
+
+        self.removeTransparent = False
+        self.labels_full = None
+        self.mask = None
+        self.clustered_img = None
+        self.cluster_infos = None
 
     def remove_transparent(self, alpha_threshold=250):
         """
-        Remove transparent pixels from the image.
-
-        Args:
-            alpha_threshold (int): Threshold for alpha channel to consider a pixel transparent.
+        Removes transparent pixels from the image.
+        A pixel is considered transparent if its alpha value is less than alpha_threshold.
         """
-        if self.image.shape[2] == 4:
-            alpha_channel = self.image[:, :, 3]
-            self.image = self.image[alpha_channel >= alpha_threshold]
-            self.image = self.image[:, :, :3]
+        transparent_pixels = self.data[:, 3] <= alpha_threshold
+        self.data[transparent_pixels] = np.nan
+        self.removeTransparent = True
 
     def filter_alpha(self):
         """
-        Filter out pixels with low alpha values.
+        Returns a boolean mask indicating which pixels in the image are not transparent.
         """
-        if self.image.shape[2] == 4:
-            alpha_channel = self.image[:, :, 3]
-            self.image = self.image[alpha_channel > 0]
+        return ~np.isnan(self.data[:, 3])
 
     def cluster(
-        self, n_clusters=5, remove_transparent_pixels=True, alpha_threshold=250
+        self, n_clusters=None, initial_clusters=None, merge_similar=False, threshold=10
     ):
         """
-        Cluster the image based on its colors.
-
-        Args:
-            n_clusters (int): Number of clusters to create.
-            remove_transparent_pixels (bool): Whether to remove transparent pixels before clustering.
-            alpha_threshold (int): Threshold for alpha channel to consider a pixel transparent.
+        Performs color clustering on the image.
+        If initial_clusters is provided, it is used as initialization for the KMeans algorithm.
+        Otherwise, if n_clusters is provided, it is used to determine the number of clusters.
+        If merge_similar is True, clusters with similar colors are merged.
+        The threshold for determining whether two colors are similar is given by threshold.
         """
-        if remove_transparent_pixels:
-            self.remove_transparent(alpha_threshold)
+        self.initial_clusters = initial_clusters
+        if initial_clusters is not None:
+            self.n_clusters = self.initial_clusters.shape[0]
+        else:
+            if n_clusters is not None:
+                self.n_clusters = n_clusters
+            else:
+                print("Error, choice cluster number n_clusters")
 
-        pixels = self.image.reshape((-1, 3))
-        kmeans = KMeans(n_clusters=n_clusters)
-        kmeans.fit(pixels)
+        mask = self.filter_alpha()
+        self.mask = mask
+        data_no_nan = self.data[mask]
+        if self.initial_clusters is not None:
+            kmeans = KMeans(
+                n_clusters=self.n_clusters, init=self.initial_clusters, n_init=10
+            )
+        else:
+            kmeans = KMeans(n_clusters=self.n_clusters, random_state=0)
+        self.labels = kmeans.fit_predict(data_no_nan[:, :3])  # Ignora la colonna alpha
+        self.center_colors = kmeans.cluster_centers_
+        self.labels_full = np.full(mask.shape[0], -1)
+        self.labels_full[mask] = self.labels
 
-        self.cluster_centers = kmeans.cluster_centers_
-        self.cluster_labels = kmeans.labels_
-        self.cluster_counts = np.bincount(self.cluster_labels)
-        self.cluster_percentages = self.cluster_counts / len(self.cluster_labels)
-
-        self.create_clustered_image()
-        self.extract_cluster_info()
+        if merge_similar:
+            while True:
+                # Calcola la distanza euclidea tra i colori dei centri dei cluster
+                distances = distance.cdist(
+                    self.center_colors, self.center_colors, "euclidean"
+                )
+                # Trova la distanza minima che non sia sulla diagonale
+                min_distance = np.min(
+                    distances + np.eye(distances.shape[0]) * distances.max()
+                )
+                if min_distance >= threshold:
+                    break
+                else:
+                    self.n_clusters -= 1
+                    kmeans = KMeans(n_clusters=self.n_clusters, random_state=0)
+                    self.labels = kmeans.fit_predict(
+                        data_no_nan[:, :3]
+                    )  # Ignora la colonna alpha
+                    self.center_colors = kmeans.cluster_centers_
+                    self.labels_full = np.full(mask.shape[0], -1)
+                    self.labels_full[mask] = self.labels
 
     def create_clustered_image(self):
         """
-        Create a new image where each pixel is replaced with its cluster center color.
+        Creates an image where each pixel is replaced with the color of its cluster.
         """
-        new_image = np.zeros_like(self.image)
-        for i in range(self.image.shape[0]):
-            for j in range(self.image.shape[1]):
-                pixel_cluster = self.cluster_labels[i * self.image.shape[1] + j]
-                new_image[i, j] = self.cluster_centers[pixel_cluster]
-        self.clustered_image = new_image
+        self.clustered_img = np.zeros_like(self.img_array)
+        for i in range(self.img_array.shape[0]):
+            for j in range(self.img_array.shape[1]):
+                if self.labels_full[i * self.img_array.shape[1] + j] != -1:
+                    self.clustered_img[i, j, :3] = self.center_colors[
+                        self.labels_full[i * self.img_array.shape[1] + j]
+                    ]
+                    self.clustered_img[i, j, 3] = self.data[
+                        i * self.img_array.shape[1] + j, 3
+                    ]  # Mantieni il valore alfa originale
+                else:
+                    self.clustered_img[i, j] = [
+                        255,
+                        255,
+                        255,
+                        0,
+                    ]  # white or transparent
 
     def create_clustered_image_with_ids(self):
         """
-        Create a new image where each pixel is replaced with its cluster ID.
+        Creates an image where each pixel is replaced with the ID of its cluster.
         """
-        new_image = np.zeros_like(self.image)
-        for i in range(self.image.shape[0]):
-            for j in range(self.image.shape[1]):
-                pixel_cluster = self.cluster_labels[i * self.image.shape[1] + j]
-                new_image[i, j] = pixel_cluster
-        self.clustered_image = new_image
+        # Inizializza un array bidimensionale con la stessa forma di self.img_array
+        self.clustered_img_with_ids = np.zeros(
+            (self.img_array.shape[0], self.img_array.shape[1])
+        )
+        for i in range(self.img_array.shape[0]):
+            for j in range(self.img_array.shape[1]):
+                if self.labels_full[i * self.img_array.shape[1] + j] != -1:
+                    # Rimpiazza il colore con l'ID del cluster
+                    self.clustered_img_with_ids[i, j] = self.labels_full[
+                        i * self.img_array.shape[1] + j
+                    ]
+                else:
+                    self.clustered_img_with_ids[i, j] = self.n_clusters + 1
 
     def extract_cluster_info(self):
         """
-        Extract information about each cluster, including its RGB and HEX color, percentage, and brightness.
+        Extracts information about the clusters, such as the color of the centroid, the number of pixels, and the percentage of total pixels.
         """
-        self.cluster_info = []
-        for i, center in enumerate(self.cluster_centers):
-            rgb_color = tuple(map(int, center))
-            hex_color = self.rgb_to_hex(rgb_color)
-            percentage = self.cluster_percentages[i]
-            brightness = self.calculate_brightness(rgb_color)
-            self.cluster_info.append(
-                {
-                    "id": i,
-                    "rgb": rgb_color,
-                    "hex": hex_color,
-                    "percentage": percentage,
-                    "brightness": brightness,
-                }
+        counter = Counter(self.labels)
+        clusters_sorted = sorted(counter.items(), key=lambda x: x[1], reverse=True)
+        cluster_info = {}
+        total_pixels = sum(counter.values())
+        for i, (cluster, count) in enumerate(clusters_sorted):
+            cluster_info[i] = {
+                "color": self.center_colors[cluster],
+                "pixel_count": count,
+                "total_pixel_percentage": (count / total_pixels) * 100,
+                "original_position": cluster,
+            }
+        cluster_info = dict(
+            sorted(
+                cluster_info.items(),
+                key=lambda item: item[1]["pixel_count"],
+                reverse=True,
             )
+        )
+        self.cluster_infos = cluster_info
+        self.total_pixels = total_pixels
 
     def calculate_brightness(self, color):
         """
-        Calculate the brightness of a color.
-
-        Args:
-            color (tuple): RGB color tuple.
-
-        Returns:
-            float: Brightness value (0-1).
+        Calculates the brightness of a color.
+        Brightness is defined as the average of the RGB values.
         """
-        r, g, b = color
-        return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        # Calcola la luminosità come la media dei valori RGB
+        return sum(color) / (3 * 255)
 
     def plot_original_image(self, ax=None, max_size=(1024, 1024)):
         """
-        Plot the original image.
-
-        Args:
-            ax (matplotlib.axes.Axes): Axes object to plot on.
-            max_size (tuple): Maximum size of the image to display.
+        Displays the original image.
+        If ax is provided, the image is displayed on that subplot.
+        Otherwise, a new subplot is created.
+        The image is resized to max_size to avoid using too much memory.
         """
-        fig, ax = plt.subplots()
+        # Riduci la risoluzione dell'immagine
+        img = self.img.copy()
+        img.thumbnail(max_size, Image.LANCZOS)
+
         if ax is None:
-            
-            pass
-        ax.imshow(self.image)
+            ax = plt.gca()
+        ax.imshow(np.array(img))
         ax.set_title("Original Image")
         ax.axis("off")
 
-        # Resize the figure to fit the image within max_size
-        width, height = self.image.shape[1], self.image.shape[0]
-        if width > max_size[0] or height > max_size[1]:
-            if width / height > max_size[0] / max_size[1]:
-                new_width = max_size[0]
-                new_height = int(height * (new_width / width))
-            else:
-                new_height = max_size[1]
-                new_width = int(width * (new_height / height))
-            fig.set_size_inches(new_width / fig.dpi, new_height / fig.dpi)
-
     def plot_clustered_image(self, ax=None, max_size=(1024, 1024)):
         """
-        Plot the clustered image.
-
-        Args:
-            ax (matplotlib.axes.Axes): Axes object to plot on.
-            max_size (tuple): Maximum size of the image to display.
+        Displays the clustered image.
+        If ax is provided, the image is displayed on that subplot.
+        Otherwise, a new subplot is created.
+        The image is resized to max_size to avoid using too much memory.
         """
-        fig, ax = plt.subplots()
-        if ax is None:
-            
-            pass
-        ax.imshow(self.clustered_image)
-        ax.set_title("Clustered Image")
-        ax.axis("off")
+        # Pre-calcola l'immagine raggruppata
+        if self.clustered_img is None:
+            self.create_clustered_image()
 
-        # Resize the figure to fit the image within max_size
-        width, height = self.clustered_image.shape[1], self.clustered_image.shape[0]
-        if width > max_size[0] or height > max_size[1]:
-            if width / height > max_size[0] / max_size[1]:
-                new_width = max_size[0]
-                new_height = int(height * (new_width / width))
-            else:
-                new_height = max_size[1]
-                new_width = int(width * (new_height / height))
-            fig.set_size_inches(new_width / fig.dpi, new_height / fig.dpi)
+        # Riduci la risoluzione dell'immagine raggruppata
+        img = Image.fromarray(self.clustered_img).convert("RGBA")
+        img.thumbnail(max_size, Image.LANCZOS)
+
+        if ax is None:
+            ax = plt.gca()
+        ax.imshow(np.array(img))
+        ax.set_title("Clustered Image ({} clusters)".format(self.n_clusters))
+        ax.axis("off")
 
     def plot_clustered_image_high_contrast(
-        self, ax=None, max_size=(1024, 1024), dpi=100
+        self, style="jet", show_percentage=True, dpi=100, ax=None
     ):
         """
-        Plot the clustered image with high contrast colors.
-
-        Args:
-            ax (matplotlib.axes.Axes): Axes object to plot on.
-            max_size (tuple): Maximum size of the image to display.
-            dpi (int): DPI of the plot.
+        Displays the clustered image with high contrast between the cluster colors.
+        The style parameter determines the colormap used.
+        If show_percentage is True, the percentage of pixels in each cluster is displayed in the legend.
         """
-        fig, ax = plt.subplots(dpi=dpi)
+        # Prima assicurati di aver chiamato la funzione create_clustered_image_with_ids
+        self.create_clustered_image_with_ids()
+
+        # Crea una nuova figura con i DPI specificati
         if ax is None:
-            
-            pass
+            fig, ax = plt.subplots(dpi=dpi)
 
-        high_contrast_colors = [
-            self.rgb_to_hex(self.closest_color(center))
-            for center in self.cluster_centers
+        # Visualizza l'immagine
+        im = ax.imshow(self.clustered_img_with_ids, cmap=style)
+
+        # Crea una legenda con un rettangolo colorato per ogni etichetta di cluster
+        colors = [
+            im.cmap(im.norm(self.cluster_infos[i]["original_position"]))
+            for i in range(self.n_clusters)
         ]
+        if show_percentage:
+            labels = [
+                f"Cluster {self.cluster_infos[i]['original_position']} ({self.cluster_infos[i]['total_pixel_percentage']:.2f}%)"
+                for i in range(self.n_clusters)
+                if i in self.cluster_infos
+            ]
+        else:
+            labels = [
+                f"Cluster {self.cluster_infos[i]['original_position']}"
+                for i in range(self.n_clusters)
+            ]
+        patches = [
+            mpatches.Patch(color=colors[i], label=labels[i]) for i in range(len(colors))
+        ]
+        plt.legend(
+            handles=patches,
+            bbox_to_anchor=(1.05, 1),
+            loc=2,
+            borderaxespad=0.0,
+            title="Legend",
+        )
 
-        new_image = np.zeros_like(self.image)
-        for i in range(self.image.shape[0]):
-            for j in range(self.image.shape[1]):
-                pixel_cluster = self.cluster_labels[i * self.image.shape[1] + j]
-                new_image[i, j] = self.hex_to_rgb(high_contrast_colors[pixel_cluster])
-
-        ax.imshow(new_image)
-        ax.set_title("Clustered Image (High Contrast)")
+        ax.set_title(
+            "Clustered Image with High Contrast ({} clusters)".format(self.n_clusters)
+        )
         ax.axis("off")
 
-        # Resize the figure to fit the image within max_size
-        width, height = new_image.shape[1], new_image.shape[0]
-        if width > max_size[0] or height > max_size[1]:
-            if width / height > max_size[0] / max_size[1]:
-                new_width = max_size[0]
-                new_height = int(height * (new_width / width))
-            else:
-                new_height = max_size[1]
-                new_width = int(width * (new_height / height))
-            fig.set_size_inches(new_width / fig.dpi, new_height / fig.dpi)
+        # Mostra la figura
+        if ax is None:
+            plt.show()
 
     def plot_cluster_pie(self, ax=None, dpi=100):
         """
-        Plot a pie chart of the cluster percentages.
-
-        Args:
-            ax (matplotlib.axes.Axes): Axes object to plot on.
-            dpi (int): DPI of the plot.
+        Displays a pie chart showing the distribution of pixels among the clusters.
+        If ax is provided, the chart is displayed on that subplot.
+        Otherwise, a new subplot is created.
         """
         if ax is None:
             fig, ax = plt.subplots(dpi=dpi)
-
-        labels = [info["hex"] for info in self.cluster_info]
-        sizes = [info["percentage"] for info in self.cluster_info]
-
-        ax.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90)
-        ax.axis("equal")  # Equal aspect ratio ensures that pie is drawn as a circle.
-        ax.set_title("Cluster Percentages")
+        labels = [
+            f"Cluster {self.cluster_infos[i]['original_position']}"
+            for i in range(self.n_clusters)
+            if i in self.cluster_infos
+        ]
+        sizes = [
+            self.cluster_infos[i]["pixel_count"]
+            for i in range(self.n_clusters)
+            if i in self.cluster_infos
+        ]
+        colors = [
+            self.cluster_infos[i]["color"] / 255
+            for i in range(self.n_clusters)
+            if i in self.cluster_infos
+        ]
+        wedges, text_labels, text_percentages = ax.pie(
+            sizes, labels=labels, colors=colors, startangle=90, autopct="%1.1f%%"
+        )
+        for i in range(len(wedges)):
+            color = "white" if self.calculate_brightness(colors[i]) < 0.5 else "black"
+            text_labels[i].set_color(color)
+            text_percentages[i].set_color(color)
+        ax.legend(
+            wedges,
+            labels,
+            title="Clusters",
+            loc="best",
+            bbox_to_anchor=(1, 0.5),
+            fontsize=8,
+        )
+        ax.axis("equal")
+        ax.set_title("PieChart ({} clusters)".format(self.n_clusters))
+        plt.show()
 
     def plot_cluster_bar(self, ax=None, dpi=100):
         """
-        Plot a bar chart of the cluster percentages.
-
-        Args:
-            ax (matplotlib.axes.Axes): Axes object to plot on.
-            dpi (int): DPI of the plot.
+        Displays a bar chart showing the distribution of pixels among the clusters.
+        If ax is provided, the chart is displayed on that subplot.
+        Otherwise, a new subplot is created.
         """
         if ax is None:
             fig, ax = plt.subplots(dpi=dpi)
+        labels = [f"Cluster {i}" for i in self.cluster_infos.keys()]
+        percentages = [
+            info["total_pixel_percentage"] for info in self.cluster_infos.values()
+        ]
+        pixel_counts = [info["pixel_count"] for info in self.cluster_infos.values()]
+        colors = [info["color"] / 255 for info in self.cluster_infos.values()]
+        bars = ax.bar(labels, percentages, color=colors)
+        for bar, pixel_count in zip(bars, pixel_counts):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                str(pixel_count),
+                ha="center",
+                va="bottom",
+            )
 
-        labels = [info["hex"] for info in self.cluster_info]
-        sizes = [info["percentage"] for info in self.cluster_info]
-
-        ax.bar(labels, sizes)
-        ax.set_xlabel("Clusters")
+        ax.set_xlabel("Cluster")
         ax.set_ylabel("Percentage")
-        ax.set_title("Cluster Percentages")
 
     def plot_cumulative_barchart(self, ax=None, dpi=100):
         """
-        Plot a cumulative bar chart of the cluster percentages, sorted by brightness.
-
-        Args:
-            ax (matplotlib.axes.Axes): Axes object to plot on.
-            dpi (int): DPI of the plot.
+        Displays a cumulative bar chart showing the distribution of pixels among the clusters.
+        If ax is provided, the chart is displayed on that subplot.
+        Otherwise, a new subplot is created.
         """
         if ax is None:
             fig, ax = plt.subplots(dpi=dpi)
-
-        sorted_info = sorted(self.cluster_info, key=lambda x: x["brightness"])
-        labels = [info["hex"] for info in sorted_info]
-        sizes = [info["percentage"] for info in sorted_info]
-        cumulative_sizes = np.cumsum(sizes)
-
-        ax.bar(labels, cumulative_sizes, label="Cumulative Percentage")
-        ax.bar(labels, sizes, label="Percentage")
-
-        ax.set_xlabel("Clusters (Sorted by Brightness)")
-        ax.set_ylabel("Percentage")
-        ax.set_title("Cumulative Cluster Percentages")
-        ax.legend()
+        bottom = 0
+        for i, info in self.cluster_infos.items():
+            color = info["color"] / 255
+            percentage = info["total_pixel_percentage"]
+            pixel_count = info["pixel_count"]
+            ax.bar("Cluster", height=percentage, color=color, bottom=bottom)
+            brightness = self.calculate_brightness(color)
+            text_color = "white" if brightness < 0.75 else "black"
+            ax.text(
+                "Cluster",
+                bottom + percentage / 2,
+                str(pixel_count),
+                ha="center",
+                va="center",
+                color=text_color,
+            )
+            ax.yaxis.set_minor_locator(AutoMinorLocator())
+            bottom += percentage
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["bottom"].set_visible(False)
+        ax.spines["left"].set_visible(True)
+        ax.axes.xaxis.set_visible(False)
 
     def plot_images(self, max_size=(1024, 1024)):
         """
-        Plot the original and clustered images side by side.
-
-        Args:
-            max_size (tuple): Maximum size of the images to display.
+        Displays the original image, the clustered image, and the high contrast clustered image side by side.
         """
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        self.plot_original_image(ax1, max_size)
-        self.plot_clustered_image(ax2, max_size)
+        fig, axs = plt.subplots(1, 3, figsize=(20, 5))
+        self.plot_original_image(ax=axs[0], max_size=max_size)
+        self.plot_clustered_image(ax=axs[1], max_size=max_size)
+        self.plot_clustered_image_high_contrast(ax=axs[2])
         plt.show()
 
     def plot_image_with_grid(
-        self, grid_size=(10, 10), max_size=(1024, 1024), dpi=100
+        self, grid_size=50, color="white", max_size=(1024, 1024), dpi=100
     ):
         """
-        Plot the original image with a grid overlay, where each grid cell shows the dominant cluster color.
-
-        Args:
-            grid_size (tuple): Number of rows and columns in the grid.
-            max_size (tuple): Maximum size of the image to display.
-            dpi (int): DPI of the plot.
+        Displays the original image with a grid overlaid.
+        The grid size is determined by grid_size.
+        The grid color is determined by color.
+        The image is resized to max_size to avoid using too much memory.
         """
         fig, ax = plt.subplots(dpi=dpi)
-        self.plot_original_image(ax, max_size)
 
-        width, height = self.image.shape[1], self.image.shape[0]
-        grid_width = width // grid_size[1]
-        grid_height = height // grid_size[0]
+        # Riduci la risoluzione dell'immagine originale
+        img = self.img.copy()
+        img.thumbnail(max_size, Image.LANCZOS)
 
-        for i in range(grid_size[0]):
-            for j in range(grid_size[1]):
-                y_start = i * grid_height
-                y_end = (i + 1) * grid_height
-                x_start = j * grid_width
-                x_end = (j + 1) * grid_width
+        # Mostra l'immagine originale
+        ax.imshow(np.array(img))
 
-                grid_cell = self.image[y_start:y_end, x_start:x_end]
-                pixels = grid_cell.reshape((-1, 3))
+        # Aggiungi la griglia
+        ax.set_xticks(np.arange(-0.5, img.size[0], grid_size), minor=True)
+        ax.set_yticks(np.arange(-0.5, img.size[1], grid_size), minor=True)
+        ax.grid(which="minor", color=color, linestyle="-", linewidth=2)
 
-                if len(pixels) > 0:
-                    kmeans = KMeans(n_clusters=1)
-                    kmeans.fit(pixels)
-                    dominant_color = self.rgb_to_hex(tuple(map(int, kmeans.cluster_centers_[0])))
-
-                    rect = plt.Rectangle(
-                        (x_start, y_start),
-                        grid_width,
-                        grid_height,
-                        linewidth=1,
-                        edgecolor="black",
-                        facecolor=dominant_color,
-                        alpha=0.5,
-                    )
-                    ax.add_patch(rect)
+        # Imposta il titolo e nasconde gli assi
+        ax.set_title("Original Image with Grid")
+        ax.axis("on")
 
         plt.show()
 
-    def save_plots(self, output_dir="output", filename_prefix="cluster_analysis"):
+    def save_plots(self):
         """
-        Save the generated plots to files.
-
-        Args:
-            output_dir (str): Directory to save the plots in.
-            filename_prefix (str): Prefix for the filenames.
+        Saves all the plots in a directory named "output/{self.filename}".
+        If the directory does not exist, it is created.
         """
-        os.makedirs(output_dir, exist_ok=True)
-
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        self.plot_original_image(ax1)
-        self.plot_clustered_image(ax2)
-        plt.savefig(os.path.join(output_dir, f"{filename_prefix}_images.png"))
-        plt.close(fig)
-
-        fig, ax = plt.subplots()
-        self.plot_cluster_pie(ax)
-        plt.savefig(os.path.join(output_dir, f"{filename_prefix}_piechart.png"))
-        plt.close(fig)
-
-        fig, ax = plt.subplots()
-        self.plot_cluster_bar(ax)
-        plt.savefig(os.path.join(output_dir, f"{filename_prefix}_barchart.png"))
-        plt.close(fig)
-
-        fig, ax = plt.subplots()
-        self.plot_clustered_image_high_contrast(ax)
-        plt.savefig(
-            os.path.join(output_dir, f"{filename_prefix}_cluster_image.png")
-        )
-        plt.close(fig)
-
-    def rgb_to_hex(self, color):
-        """
-        Convert an RGB color tuple to a HEX color string.
-
-        Args:
-            color (tuple): RGB color tuple.
-
-        Returns:
-            str: HEX color string.
-        """
-        return "#{:02x}{:02x}{:02x}".format(int(color[0]), int(color[1]), int(color[2]))
-
-    def rgba_to_hex(self, color):
-        """
-        Convert an RGBA color tuple to a HEX color string.
-
-        Args:
-            color (tuple): RGBA color tuple.
-
-        Returns:
-            str: HEX color string.
-        """
-        return "#{:02x}{:02x}{:02x}{:02x}".format(
-            int(color[0]), int(color[1]), int(color[2]), int(color[3])
-        )
-
-    def hex_to_rgb(self, hex_color):
-        """
-        Convert a HEX color string to an RGB color tuple.
-
-        Args:
-            hex_color (str): HEX color string.
-
-        Returns:
-            tuple: RGB color tuple.
-        """
-        hex_color = hex_color.lstrip("#")
-        return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
-
-    def HEX_COLORS(self):
-        """
-        Get a list of predefined HEX color strings.
-
-        Returns:
-            list: List of HEX color strings.
-        """
-        return [
-            "#000000",
-            "#FFFFFF",
-            "#FF0000",
-            "#00FF00",
-            "#0000FF",
-            "#FFFF00",
-            "#00FFFF",
-            "#FF00FF",
-            "#C0C0C0",
-            "#808080",
-            "#800000",
-            "#808000",
-            "#008000",
-            "#800080",
-            "#008080",
-            "#000080",
-        ]
-
-    def RGB_COLORS(self):
-        """
-        Get a list of predefined RGB color tuples.
-
-        Returns:
-            list: List of RGB color tuples.
-        """
-        return [
-            (0, 0, 0),
-            (255, 255, 255),
-            (255, 0, 0),
-            (0, 255, 0),
-            (0, 0, 255),
-            (255, 255, 0),
-            (0, 255, 255),
-            (255, 0, 255),
-            (192, 192, 192),
-            (128, 128, 128),
-            (128, 0, 0),
-            (128, 128, 0),
-            (0, 128, 0),
-            (128, 0, 128),
-            (0, 128, 128),
-            (0, 0, 128),
-        ]
-
-    def get_color_names(self):
-        """
-        Get a list of predefined color names.
-
-        Returns:
-            list: List of color names.
-        """
-        return [
-            "black",
-            "white",
-            "red",
-            "lime",
-            "blue",
-            "yellow",
-            "cyan",
-            "magenta",
-            "silver",
-            "gray",
-            "maroon",
-            "olive",
-            "green",
-            "purple",
-            "teal",
-            "navy",
-        ]
-
-    def closest_color(self, requested_color):
-        """
-        Find the closest predefined color to a given RGB color.
-
-        Args:
-            requested_color (tuple): RGB color tuple.
-
-        Returns:
-            tuple: RGB color tuple of the closest predefined color.
-        """
-        min_colors = {}
-        for key, name in enumerate(self.RGB_COLORS()):
-            r_c, g_c, b_c = name
-            rd = (r_c - requested_color[0]) ** 2
-            gd = (g_c - requested_color[1]) ** 2
-            bd = (b_c - requested_color[2]) ** 2
-            min_colors[(rd + gd + bd)] = name
-        return min_colors[min(min_colors.keys())]
-
-
-if __name__ == "__main__":
-    image_path = "path/to/your/image.jpg"  # Replace with the path to your image
-    clusterer = ImageCluster(image_path)
-    clusterer.cluster(n_clusters=5)
-    clusterer.save_plots()
+        # Crea la directory se non esiste
+        if not os.path.exists(f"output/{self.filename}"):
+            os.makedirs(f"output/{self.filename}")
+        self.plot_original_image()
+        plt.savefig(f"output/{self.filename}/{self.filename}.png")
+        self.plot_clustered_image()
+        plt.savefig(f"output/{self.filename}/{self.filename}_cluster_image.png")
+        self.plot_cluster_pie()
+        plt.savefig(f"output/{self.filename}/{self.filename}_piechart.png")
+        self.plot_clustered_image_high_contrast()
+        plt.savefig(f"output/{self.filename}/{self.filename}_high_contrast.png")
