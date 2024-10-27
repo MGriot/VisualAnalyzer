@@ -1,7 +1,6 @@
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-from skimage.metrics import structural_similarity as ssim
 
 
 class ImageAnalyzer:
@@ -9,16 +8,20 @@ class ImageAnalyzer:
     Class to analyze and compare images.
     """
 
-    def __init__(self, img_input, ideal_img_input):
+    def __init__(self, img_input, ideal_img_input, ideal_img_processed=None):
         """
         Initialize the ImageAnalyzer object.
 
         Args:
             img_input (str or numpy.ndarray): Path to the image file or the image itself.
             ideal_img_input (str or numpy.ndarray): Path to the ideal image file or the ideal image itself.
+            ideal_img_processed (numpy.ndarray, optional): The already processed ideal image. Defaults to None.
         """
         self.img = self.load_image(img_input)
-        self.ideal_img = self.load_image(ideal_img_input)
+        if ideal_img_processed is not None:
+            self.ideal_img = ideal_img_processed
+        else:
+            self.ideal_img = self.load_image(ideal_img_input)
 
     def load_image(self, input):
         """
@@ -31,6 +34,7 @@ class ImageAnalyzer:
             numpy.ndarray: Loaded image.
         """
         if isinstance(input, str):
+            # pylint: disable=no-member
             return cv2.imread(input)
         elif isinstance(input, np.ndarray):
             return input
@@ -47,6 +51,7 @@ class ImageAnalyzer:
         Returns:
             numpy.ndarray: Histogram of the image.
         """
+        # pylint: disable=no-member
         hist = cv2.calcHist([img], [0], None, [256], [0, 256])
         return hist
 
@@ -61,6 +66,7 @@ class ImageAnalyzer:
         Returns:
             dict: Dictionary containing the comparison results.
         """
+        # pylint: disable=no-member
         correlation = cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
         chi_square = cv2.compareHist(hist1, hist2, cv2.HISTCMP_CHISQR)
         intersection = cv2.compareHist(hist1, hist2, cv2.HISTCMP_INTERSECT)
@@ -84,13 +90,14 @@ class ImageAnalyzer:
         hist2 = self.calculate_histogram(self.ideal_img)
         histogram_comparison = self.compare_histograms(hist1, hist2)
 
+        # pylint: disable=no-member
         gray1 = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
         gray2 = cv2.cvtColor(self.ideal_img, cv2.COLOR_BGR2GRAY)
-        ssim_score, ssim_diff = ssim(gray1, gray2, full=True)
+        mse_score = np.mean((gray1 - gray2) ** 2)
 
         return {
             "Histogram Comparison": histogram_comparison,
-            "SSIM": ssim_score,
+            "MSE": mse_score,
         }
 
     def draw_histograms(self, img, title):
@@ -103,6 +110,7 @@ class ImageAnalyzer:
         """
         color = ("b", "g", "r")
         for i, col in enumerate(color):
+            # pylint: disable=no-member
             histr = cv2.calcHist([img], [i], None, [256], [0, 256])
             plt.plot(histr, color=col)
             plt.xlim([0, 256])
