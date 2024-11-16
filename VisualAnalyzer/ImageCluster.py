@@ -21,8 +21,41 @@ import os
 # aggiungi una caratteristica tipo nome file (Senza estensione) in modo da usarlo per salvare tutti i grafici
 class ImageCluster:
     """
-    This class provides methods to perform color clustering on an image.
-    The image can be provided as a file path or as a PIL.Image object.
+    This class provides methods to perform color clustering on an image and 
+    analyze the color distribution. It uses KMeans clustering to group similar 
+    colors together and provides various visualization tools to understand 
+    the results.
+
+    Attributes:
+        image_input (str or PIL.Image.Image): The input image, either a file path or a PIL.Image object.
+        n_clusters (int): The number of clusters to form.
+        initial_clusters (np.ndarray): Initial cluster centers, if provided.
+        img_array (np.ndarray): The image data as a NumPy array.
+        data (np.ndarray): Reshaped image data for clustering.
+        removeTransparent (bool): Flag indicating if transparent pixels have been removed.
+        labels_full (np.ndarray): Cluster labels for all pixels, including transparent ones.
+        mask (np.ndarray): Boolean mask indicating non-transparent pixels.
+        clustered_img (np.ndarray): The clustered image, where each pixel is replaced with its cluster's color.
+        cluster_infos (dict): Information about each cluster, including color, pixel count, and percentage.
+
+    Methods:
+        remove_transparent(alpha_threshold=250): Removes transparent pixels from the image.
+        filter_alpha(): Returns a boolean mask indicating non-transparent pixels.
+        cluster(n_clusters=None, initial_clusters=None, merge_similar=False, threshold=10): Performs color clustering.
+        create_clustered_image(): Creates an image where each pixel is replaced with its cluster's color.
+        create_clustered_image_with_ids(): Creates an image where each pixel is replaced with its cluster's ID.
+        extract_cluster_info(): Extracts information about the clusters.
+        calculate_brightness(color): Calculates the brightness of a color.
+        plot_original_image(ax=None, max_size=(1024, 1024)): Displays the original image.
+        plot_clustered_image(ax=None, max_size=(1024, 1024)): Displays the clustered image.
+        plot_clustered_image_high_contrast(style='jet', show_percentage=True, dpi=100, ax=None): Displays the clustered image with high contrast.
+        plot_cluster_pie(ax=None, dpi=100): Displays a pie chart of cluster distribution.
+        plot_cluster_bar(ax=None, dpi=100): Displays a bar chart of cluster distribution.
+        plot_cumulative_barchart(ax=None, dpi=100): Displays a cumulative bar chart of cluster distribution.
+        plot_images(max_size=(1024, 1024)): Displays the original, clustered, and high contrast clustered images.
+        plot_image_with_grid(grid_size=50, color='white', max_size=(1024, 1024), dpi=100): Displays the original image with a grid overlaid.
+        save_plots(): Saves all generated plots to a directory.
+        get_dominant_color(): Returns the dominant color of the image.
     """
 
     def __init__(self, image_input):
@@ -206,7 +239,7 @@ class ImageCluster:
         """
         # Riduci la risoluzione dell'immagine
         img = self.img.copy()
-        img.thumbnail(max_size, Image.LANCZOS)
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
         if ax is None:
             ax = plt.gca()
@@ -227,7 +260,7 @@ class ImageCluster:
 
         # Riduci la risoluzione dell'immagine raggruppata
         img = Image.fromarray(self.clustered_img).convert("RGBA")
-        img.thumbnail(max_size, Image.LANCZOS)
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
         if ax is None:
             ax = plt.gca()
@@ -413,7 +446,7 @@ class ImageCluster:
 
         # Riduci la risoluzione dell'immagine originale
         img = self.img.copy()
-        img.thumbnail(max_size, Image.LANCZOS)
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
         # Mostra l'immagine originale
         ax.imshow(np.array(img))
@@ -445,3 +478,15 @@ class ImageCluster:
         plt.savefig(f"output/{self.filename}/{self.filename}_piechart.png")
         self.plot_clustered_image_high_contrast()
         plt.savefig(f"output/{self.filename}/{self.filename}_high_contrast.png")
+
+    def get_dominant_color(self):
+        """
+        Returns the dominant color of the image, which is the color of the cluster with the most pixels.
+        This method should be called after the cluster() method has been called.
+
+        Returns:
+            np.ndarray: The RGB color of the dominant cluster.
+        """
+        if self.cluster_infos is None:
+            raise ValueError("The cluster() method must be called before get_dominant_color().")
+        return self.cluster_infos[0]['color']

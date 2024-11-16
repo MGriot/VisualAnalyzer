@@ -295,14 +295,76 @@ class ColorFinder:
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
+    def find_color_and_percentage(self, image_path: str) -> tuple:
+        """
+        Finds and highlights a color in an image and calculates the percentage of pixels matching that color.
+
+        Combines process_image and get_color_percentage for a single call.
+
+        Parameters:
+            image_path (str): The path to the input image.
+
+        Returns:
+            tuple: A tuple containing the processed image with highlighted regions, the selected color (BGR),
+                   the percentage of pixels matching the color, and the total number of pixels matching the color.
+                   Returns None if the image cannot be loaded.
+        """
+        image = cv2.imread(image_path)
+        if image is None:
+            print(f"Error: Could not load image at {image_path}")
+            return None
+
+        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+        # Create a mask based on color limits
+        mask = cv2.inRange(hsv_image, self.lower_limit, self.upper_limit)
+
+        # Find contours and draw rectangles (as in process_image)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            if cv2.contourArea(contour) > 500:
+                x, y, w, h = cv2.boundingRect(contour)
+                image = cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 5)
+
+        # Calculate percentage (as in get_color_percentage)
+        matched_pixels = cv2.countNonZero(mask)
+        total_pixels = image.shape[0] * image.shape[1]
+        percentage = (matched_pixels / total_pixels) * 100
+
+        selected_color_bgr = cv2.cvtColor(
+            np.uint8([[self.lower_limit]]), cv2.COLOR_HSV2BGR
+        )[0][0]
+
+        # Add the color legend (from process_image) - slightly modified to avoid redundancy
+        cv2.rectangle(
+            image, (10, 10), (30, 30), selected_color_bgr.tolist(), -1
+        )  # Reusing selected_color_bgr
+        cv2.putText(
+            image, "Color", (35, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
+        )
+
+        return image, selected_color_bgr, percentage, matched_pixels
+
 
 if __name__ == "__main__":
-    # Example usage
+    # Example usage:
     color_finder = ColorFinder(
         base_color=(30, 255, 255),
         hue_percentage=3,
         saturation_percentage=70,
         value_percentage=70,
     )
+
+    image_path = r"C:\Users\Admin\Documents\Coding\VisualAnalyzer\.old\img\j.png"
     # color_finder.process_webcam()
-    color_finder.process_image("path/to/your/image.jpg")
+    #color_finder.process_image(r"C:\Users\Admin\Documents\Coding\VisualAnalyzer\.old\img\j.png")
+    results = color_finder.find_color_and_percentage(image_path)
+
+    if results:
+        processed_image, color_bgr, percentage, matched_pixels = results
+        print(f"Selected Color (BGR): {color_bgr}")
+        print(f"Percentage of matched pixels: {percentage:.2f}%")
+        print(f"Number of matched pixels: {matched_pixels}")
+        cv2.imshow("Processed Image", processed_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
