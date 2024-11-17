@@ -1,5 +1,3 @@
-
-
 import cv2  # type: ignore
 import numpy as np
 import os
@@ -314,7 +312,7 @@ class ColorFinder:
         cv2.destroyAllWindows()
 
     def find_color_and_percentage(
-        self, image_path: str, save_images: bool = False, exclude_transparent: bool = False
+        self, image_path: str, save_images: bool = False, exclude_transparent: bool = False, output_dir: str = "processed_images"
     ) -> Tuple[np.ndarray, Dict[str, Any], float, int, int, int]:
         """
         Finds and highlights a color in an image and calculates the percentage of pixels matching that color.
@@ -324,6 +322,7 @@ class ColorFinder:
         Parameters:
             image_path (str): The path to the input image.
             exclude_transparent (bool): Whether to exclude transparent pixels from the calculation.
+            output_dir (str): The directory to save the processed images to.
 
         Returns:
             tuple: A tuple containing the processed image with highlighted regions,
@@ -446,14 +445,14 @@ class ColorFinder:
 
         if save_images:
             # Create a folder "processed_images" if it doesn't exist
-            save_dir = "processed_images"
-            os.makedirs(save_dir, exist_ok=True)
+            # save_dir = "processed_images"
+            os.makedirs(output_dir, exist_ok=True)
 
             # Save original image, processed image, and mask (if desired)
-            cv2.imwrite(os.path.join(save_dir, "original_image.png"), image)
-            cv2.imwrite(os.path.join(save_dir, "processed_image.png"), image)
+            cv2.imwrite(os.path.join(output_dir, "original_image.png"), image)
+            cv2.imwrite(os.path.join(output_dir, "processed_image.png"), image)
             cv2.imwrite(
-                os.path.join(save_dir, "mask.png"), mask
+                os.path.join(output_dir, "mask.png"), mask
             )  # Add mask saving if needed   processed_image,
             return (
                 image,
