@@ -1,6 +1,42 @@
-import cv2
+
+
+import cv2  # type: ignore
 import numpy as np
 import os
+from tqdm import tqdm
+from typing import Tuple, Dict, Any  # Import Tuple and Dict for type hinting
+
+
+def get_average_color(image: np.ndarray) -> np.ndarray:
+    """
+    Calculate the average color of an image.
+
+    Parameters:
+    image (numpy.ndarray): The input image.
+
+    Returns:
+    numpy.ndarray: The average color of the image.
+    """
+    average_color_per_row = np.average(image, axis=0)
+    average_color = np.average(average_color_per_row, axis=0)
+    return average_color
+
+
+def remove_outliers(data: list) -> list:
+    """
+    Remove outliers using the Interquartile Range (IQR) method.
+
+    Parameters:
+    data (list): The input data.
+
+    Returns:
+    list: The data with outliers removed.
+    """
+    q1, q3 = np.percentile(data, [25, 75])
+    iqr = q3 - q1
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+    return [x for x in data if lower_bound <= x <= upper_bound]
 
 
 class ColorFinder:
@@ -8,57 +44,15 @@ class ColorFinder:
     A class to find and highlight specific colors in images and video streams.
     """
 
-    def __init__(
-        self,
-        base_color: tuple = (30, 255, 255),
-        hue_percentage: float = 3,
-        saturation_percentage: float = 70,
-        value_percentage: float = 70,
-    ):
+    def __init__(self):
         """
-        Initialize the ColorFinder with base color and percentage ranges.
-
-        Parameters:
-        base_color (tuple): The base color in HSV.
-        hue_percentage (float): The percentage range for hue.
-        saturation_percentage (float): The percentage range for saturation.
-        value_percentage (float): The percentage range for value.
+        Initialize the ColorFinder with no base color. Color limits will be set later.
         """
-        self.lower_limit, self.upper_limit = self.get_color_limits_from_hsv(
-            base_color, hue_percentage, saturation_percentage, value_percentage
-        )
+        self.lower_limit = None
+        self.upper_limit = None
+        self.center = None
 
-    def get_average_color(self, image: np.ndarray) -> np.ndarray:
-        """
-        Calculate the average color of an image.
-
-        Parameters:
-        image (numpy.ndarray): The input image.
-
-        Returns:
-        numpy.ndarray: The average color of the image.
-        """
-        average_color_per_row = np.average(image, axis=0)
-        average_color = np.average(average_color_per_row, axis=0)
-        return average_color
-
-    def remove_outliers(self, data: list) -> list:
-        """
-        Remove outliers using the Interquartile Range (IQR) method.
-
-        Parameters:
-        data (list): The input data.
-
-        Returns:
-        list: The data with outliers removed.
-        """
-        q1, q3 = np.percentile(data, [25, 75])
-        iqr = q3 - q1
-        lower_bound = q1 - 1.5 * iqr
-        upper_bound = q3 + 1.5 * iqr
-        return [x for x in data if lower_bound <= x <= upper_bound]
-
-    def get_color_limits_from_dataset(self, dataset_path: str) -> tuple:
+    def get_color_limits_from_dataset(self, dataset_path: str) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float, float]]:
         """
         Calculate color limits (HSV) based on a dataset of images, removing outliers.
 
@@ -66,41 +60,53 @@ class ColorFinder:
         dataset_path (str): The path to the dataset of images.
 
         Returns:
-        tuple: The lower and upper color limits in HSV.
+        tuple: The lower and upper color limits in HSV, and the center of the distribution.
         """
         hues, saturations, values = [], [], []
+        image_files = [
+            f for f in os.listdir(dataset_path) if f.endswith((".jpg", ".png"))
+        ]
+        num_images = len(image_files)
 
-        for filename in os.listdir(dataset_path):
-            if filename.endswith(".jpg") or filename.endswith(".png"):
-                image_path = os.path.join(dataset_path, filename)
-                image = cv2.imread(image_path)
-                hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-                average_color = self.get_average_color(hsv_image)
-                hues.append(average_color[0])  # Hue component
-                saturations.append(average_color[1])  # Saturation component
-                values.append(average_color[2])  # Value component
+        print(f"Processing {num_images} images in dataset...")
+
+        for filename in tqdm(image_files):
+            image_path = os.path.join(dataset_path, filename)
+            image = cv2.imread(image_path)
+            hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            average_color = get_average_color(hsv_image)
+            hues.append(average_color[0])  # Hue component
+            saturations.append(average_color[1])  # Saturation component
+            values.append(average_color[2])  # Value component
+
+            print(f"Image: {filename}, Average Color (HSV): {average_color}")
 
         # Remove outliers
-        hues = self.remove_outliers(hues)
-        saturations = self.remove_outliers(saturations)
-        values = self.remove_outliers(values)
+        hues = remove_outliers(hues)
+        saturations = remove_outliers(saturations)
+        values = remove_outliers(values)
 
-        lower_limit = np.array(
+        self.lower_limit = np.array(
             [min(hues), min(saturations), min(values)], dtype=np.uint8
         )
-        upper_limit = np.array(
+        self.upper_limit = np.array(
             [max(hues), max(saturations), max(values)], dtype=np.uint8
         )
+        self.center = (np.mean(hues), np.mean(saturations), np.mean(values))
 
-        return lower_limit, upper_limit
+        print(f"Lower Limit (HSV): {self.lower_limit}")
+        print(f"Upper Limit (HSV): {self.upper_limit}")
+        print(f"Center (HSV): {self.center}")
+
+        return self.lower_limit, self.upper_limit, self.center
 
     def get_color_limits_from_hsv(
         self,
-        base_color: tuple,
+        base_color: Tuple[int, int, int],
         hue_percentage: float,
         saturation_percentage: float,
         value_percentage: float,
-    ) -> tuple:
+    ) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float, float]]:
         """
         Calculate color limits (HSV) based on a given color and user-provided percentages.
 
@@ -111,7 +117,7 @@ class ColorFinder:
         value_percentage (float): The percentage range for value.
 
         Returns:
-        tuple: The lower and upper color limits in HSV.
+        tuple: The lower and upper color limits in HSV, and the center of the distribution.
         """
         hue, saturation, value = base_color
 
@@ -119,7 +125,7 @@ class ColorFinder:
         saturation_range = 255 * saturation_percentage / 100
         value_range = 255 * value_percentage / 100
 
-        lower_limit = np.array(
+        self.lower_limit = np.array(
             [
                 max(0, hue - hue_range),
                 max(0, saturation - saturation_range),
@@ -127,7 +133,7 @@ class ColorFinder:
             ],
             dtype=np.uint8,
         )
-        upper_limit = np.array(
+        self.upper_limit = np.array(
             [
                 min(255, hue + hue_range),
                 min(255, saturation + saturation_range),
@@ -136,12 +142,19 @@ class ColorFinder:
             dtype=np.uint8,
         )
 
-        return lower_limit, upper_limit
+        self.center = (hue, saturation, value)
+
+        return self.lower_limit, self.upper_limit, self.center
 
     def process_webcam(self):
         """
         Process video from the webcam to identify and highlight areas matching the color limits.
         """
+        if self.lower_limit is None or self.upper_limit is None:
+            raise ValueError(
+                "Color limits not set. Please use get_color_limits_from_dataset or get_color_limits_from_hsv to set the limits."
+            )
+
         cap = cv2.VideoCapture(0)
 
         while True:
@@ -242,6 +255,11 @@ class ColorFinder:
         Parameters:
         image_path (str): The path to the input image.
         """
+        if self.lower_limit is None or self.upper_limit is None:
+            raise ValueError(
+                "Color limits not set. Please use get_color_limits_from_dataset or get_color_limits_from_hsv to set the limits."
+            )
+
         image = cv2.imread(image_path)
         hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
@@ -295,7 +313,9 @@ class ColorFinder:
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-    def find_color_and_percentage(self, image_path: str) -> tuple:
+    def find_color_and_percentage(
+        self, image_path: str, save_images: bool = False, exclude_transparent: bool = False
+    ) -> Tuple[np.ndarray, Dict[str, Any], float, int, int, int]:
         """
         Finds and highlights a color in an image and calculates the percentage of pixels matching that color.
 
@@ -303,66 +323,187 @@ class ColorFinder:
 
         Parameters:
             image_path (str): The path to the input image.
+            exclude_transparent (bool): Whether to exclude transparent pixels from the calculation.
 
         Returns:
-            tuple: A tuple containing the processed image with highlighted regions, the selected color (BGR),
-                   the percentage of pixels matching the color, and the total number of pixels matching the color.
-                   Returns None if the image cannot be loaded.
+            tuple: A tuple containing the processed image with highlighted regions,
+               the selected color (dictionary with different color spaces),
+               the percentage of pixels matching the color,
+               the total number of pixels matching the color,
+               and the total number of pixels in the image (including or excluding transparent pixels based on exclude_transparent).
+               Returns None if the image cannot be loaded.
         """
-        image = cv2.imread(image_path)
+        if self.lower_limit is None or self.upper_limit is None:
+            raise ValueError(
+                "Color limits not set. Please use get_color_limits_from_dataset or get_color_limits_from_hsv to set the limits."
+            )
+
+        image = cv2.imread(
+            image_path, cv2.IMREAD_UNCHANGED
+        )  # Read image with alpha channel if present
         if image is None:
             print(f"Error: Could not load image at {image_path}")
             return None
 
-        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        image_height, image_width, _ = image.shape  # Get image dimensions
+        total_image_pixels = (
+            image_height * image_width
+        )  # Calculate total pixels before any potential masking
 
-        # Create a mask based on color limits
-        mask = cv2.inRange(hsv_image, self.lower_limit, self.upper_limit)
+        if exclude_transparent and image.shape[2] == 4:  # Check if image has alpha channel
+            # Extract alpha channel
+            bgra = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
+            b, g, r, alpha = cv2.split(bgra)
+            
+            bgr = cv2.merge((b, g, r)) # Merge BGR channels
+            hsv_image = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
 
-        # Find contours and draw rectangles (as in process_image)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for contour in contours:
-            if cv2.contourArea(contour) > 500:
-                x, y, w, h = cv2.boundingRect(contour)
-                image = cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 5)
+            # Create a mask for non-transparent pixels
+            non_transparent_mask = alpha > 0
 
-        # Calculate percentage (as in get_color_percentage)
-        matched_pixels = cv2.countNonZero(mask)
-        total_pixels = image.shape[0] * image.shape[1]
-        percentage = (matched_pixels / total_pixels) * 100
+            # Apply the non-transparent mask to the HSV image
+            hsv_image_masked = hsv_image[non_transparent_mask]
+
+            # Update total pixels count used for percentage calculation
+            total_pixels = np.count_nonzero(non_transparent_mask)
+
+            # Create a mask based on color limits from the full HSV image
+            mask = cv2.inRange(hsv_image, self.lower_limit, self.upper_limit)
+
+            # Calculate percentage (as in get_color_percentage)
+            matched_pixels = cv2.countNonZero(mask)
+            percentage = (matched_pixels / total_pixels) * 100
+
+            # Find contours and draw rectangles (as in process_image)
+            contours, _ = cv2.findContours(
+                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            for contour in contours:
+                if cv2.contourArea(contour) > 500:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    bgr = cv2.rectangle(
+                        bgr, (x, y), (x + w, y + h), (0, 255, 0), 5
+                    )
+
+            # Merge BGR and alpha channels back
+            bgra = cv2.merge((bgr, alpha))
+
+            # Convert back to BGRA
+            image = cv2.cvtColor(bgra, cv2.COLOR_RGBA2BGRA)
+
+        else:
+            hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            total_pixels = total_image_pixels  # use precalculated total pixels
+
+            # Create a mask based on color limits
+            mask = cv2.inRange(hsv_image, self.lower_limit, self.upper_limit)
+
+            # Find contours and draw rectangles (as in process_image)
+            contours, _ = cv2.findContours(
+                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            for contour in contours:
+                if cv2.contourArea(contour) > 500:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    image = cv2.rectangle(
+                        image, (x, y), (x + w, y + h), (0, 255, 0), 5
+                    )
+
+            # Calculate percentage (as in get_color_percentage)
+            matched_pixels = cv2.countNonZero(mask)
+            percentage = (matched_pixels / total_pixels) * 100
 
         selected_color_bgr = cv2.cvtColor(
             np.uint8([[self.lower_limit]]), cv2.COLOR_HSV2BGR
         )[0][0]
+        selected_color_hsv = self.center
+        selected_color_rgb = cv2.cvtColor(
+            np.uint8([[selected_color_bgr]]), cv2.COLOR_BGR2RGB
+        )[0][0]
+
+        selected_colors = {
+            "BGR": selected_color_bgr,
+            "HSV": selected_color_hsv,
+            "RGB": selected_color_rgb,
+        }
 
         # Add the color legend (from process_image) - slightly modified to avoid redundancy
-        cv2.rectangle(
-            image, (10, 10), (30, 30), selected_color_bgr.tolist(), -1
-        )  # Reusing selected_color_bgr
-        cv2.putText(
-            image, "Color", (35, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
-        )
+        if (
+            not exclude_transparent or image.shape[2] != 4
+        ):  # Only add legend if not excluding transparent pixels or no alpha channel
+            cv2.rectangle(
+                image, (10, 10), (30, 30), selected_color_bgr.tolist(), -1
+            )  # Reusing selected_color_bgr
+            cv2.putText(
+                image,
+                "Color",
+                (35, 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                1,
+            )
 
-        return image, selected_color_bgr, percentage, matched_pixels
+        if save_images:
+            # Create a folder "processed_images" if it doesn't exist
+            save_dir = "processed_images"
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Save original image, processed image, and mask (if desired)
+            cv2.imwrite(os.path.join(save_dir, "original_image.png"), image)
+            cv2.imwrite(os.path.join(save_dir, "processed_image.png"), image)
+            cv2.imwrite(
+                os.path.join(save_dir, "mask.png"), mask
+            )  # Add mask saving if needed   processed_image,
+            return (
+                image,
+                selected_colors,
+                percentage,
+                matched_pixels,
+                image_width,
+                image_height,
+            )
+
+        else:
+            return (
+                image,
+                selected_colors,
+                percentage,
+                matched_pixels,
+                image_width,
+                image_height,
+            )  # Return original image if not saving
 
 
 if __name__ == "__main__":
     # Example usage:
-    color_finder = ColorFinder(
-        base_color=(30, 255, 255),
-        hue_percentage=3,
-        saturation_percentage=70,
-        value_percentage=70,
+    color_finder = ColorFinder()
+
+    # Set color limits using either method:
+    # 1. From dataset:
+    # dataset_path = "path/to/your/dataset"
+    # color_finder.get_color_limits_from_dataset(dataset_path)
+
+    # 2. From HSV:
+    base_color = (30, 255, 255)
+    hue_percentage = 3
+    saturation_percentage = 70
+    value_percentage = 70
+    lower_limit, upper_limit, center = color_finder.get_color_limits_from_hsv(
+        base_color, hue_percentage, saturation_percentage, value_percentage
     )
+    print(f"Lower Limit: {lower_limit}")
+    print(f"Upper Limit: {upper_limit}")
+    print(f"Center: {center}")
 
     image_path = r"C:\Users\Admin\Documents\Coding\VisualAnalyzer\.old\img\j.png"
     # color_finder.process_webcam()
-    #color_finder.process_image(r"C:\Users\Admin\Documents\Coding\VisualAnalyzer\.old\img\j.png")
-    results = color_finder.find_color_and_percentage(image_path)
+    # color_finder.process_image(image_path)
+    results = color_finder.find_color_and_percentage(image_path, exclude_transparent=True)
 
     if results:
-        processed_image, color_bgr, percentage, matched_pixels = results
-        print(f"Selected Color (BGR): {color_bgr}")
+        processed_image, selected_colors, percentage, matched_pixels = results
+        print(f"Selected Colors: {selected_colors}")
         print(f"Percentage of matched pixels: {percentage:.2f}%")
         print(f"Number of matched pixels: {matched_pixels}")
         cv2.imshow("Processed Image", processed_image)
