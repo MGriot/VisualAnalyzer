@@ -1,6 +1,6 @@
 from jinja2 import Environment, FileSystemLoader
 import datetime
-import cv2 as cv
+import cv2 as cv  # type: ignore
 from VisualAnalyzer.ColorFinder import ColorFinder
 import os
 import matplotlib.pyplot as plt
@@ -54,25 +54,23 @@ def analyze_image(image_path, database_path, output_dir):
         lower_limit, upper_limit, center, output_dir=output_dir
     )
 
-    return results + (color_space_plot_path,)
+    return results, color_space_plot_path  # Return results and color_space_plot_path as a tuple
 
 
 def generate_pie_chart(
-    matched_pixels, image_width, image_height, selected_colors, output_dir
+    matched_pixels, total_pixels, selected_colors, output_dir
 ):
     """
     Generates and saves a pie chart showing matched vs. unmatched pixels.
 
     Args:
         matched_pixels (int): Number of matched pixels.
-        image_width (int): Width of the image.
-        image_height (int): Height of the image.
+        total_pixels (int): Total number of pixels.
         selected_colors (dict): Dictionary containing RGB values of selected colors.
         output_dir (str): Directory to save the pie chart.
     """
-    unmatched_pixels = image_width * image_height - matched_pixels
     labels = ["Matched Pixels", "Unmatched Pixels"]
-    sizes = [matched_pixels, unmatched_pixels]
+    sizes = [matched_pixels, total_pixels - matched_pixels]
     colors = [selected_colors["RGB"] / 255, "darkgray"]
     plt.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=140)
     plt.axis("equal")
@@ -205,51 +203,52 @@ if __name__ == "__main__":
             os.makedirs(output_dir, exist_ok=True)
 
             # --- Analyze the image ---
-            results = analyze_image(image_path, DATABASE_PATH, output_dir)
-            (
-                processed_image,
-                selected_colors,
-                percentage,
-                matched_pixels,
-                image_width,
-                image_height,
-                color_space_plot_path,
-            ) = results
-            print(f"Selected Colors: {selected_colors}")
-            print(f"Percentage of matched pixels: {percentage:.2f}%")
-            print(f"Number of matched pixels: {matched_pixels}")
+            results, color_space_plot_path = analyze_image(
+                image_path, DATABASE_PATH, output_dir
+            )  # Unpack the tuple
+            if results:
+                (
+                    processed_image,
+                    selected_colors,
+                    percentage,
+                    matched_pixels,
+                    total_pixels,
+                ) = results
+                print(f"Selected Colors: {selected_colors}")
+                print(f"Percentage of matched pixels: {percentage:.2f}%")
+                print(f"Number of matched pixels: {matched_pixels}")
 
-            # --- Generate the pie chart ---
-            generate_pie_chart(
-                matched_pixels, image_width, image_height, selected_colors, output_dir
-            )
+                # --- Generate the pie chart ---
+                generate_pie_chart(
+                    matched_pixels, total_pixels, selected_colors, output_dir
+                )
 
-            # --- Move original image to output directory ---
-            original_image = os.path.join(output_dir, image_file)
-            shutil.move(image_path, original_image)
-            original_image = image_file
+                # --- Move original image to output directory ---
+                original_image = os.path.join(output_dir, image_file)
+                shutil.move(image_path, original_image)
+                original_image = image_file
 
-            # --- Generate the report ---
-            report_html_path = os.path.join(
-                output_dir, f"{file_name_without_ext}.html"
-            )  # HTML file name based on image name
-            processed_image_path = os.path.join("processed_image.png")
-            mask_path = os.path.join("mask.png")
-            pie_chart_path = os.path.join("pie_chart.png")
-            color_space_plot_path = os.path.join("color_space_plot.png")  # Update path
+                # --- Generate the report ---
+                report_html_path = os.path.join(
+                    output_dir, f"{file_name_without_ext}.html"
+                )  # HTML file name based on image name
+                processed_image_path = os.path.join("processed_image.png")
+                mask_path = os.path.join("mask.png")
+                pie_chart_path = os.path.join("pie_chart.png")
+                # color_space_plot_path = os.path.join("color_space_plot.png")  # Update path
 
-            generate_report(
-                original_image,
-                processed_image_path,
-                mask_path,
-                pie_chart_path,
-                color_space_plot_path,
-                part_number,
-                thickness,
-                LOGO,
-                TODAY,
-                AUTHOR,
-                DEPARTMENT,
-                REPORT_TITLE,
-                report_html_path,
-            )
+                generate_report(
+                    original_image,
+                    processed_image_path,
+                    mask_path,
+                    pie_chart_path,
+                    color_space_plot_path,
+                    part_number,
+                    thickness,
+                    LOGO,
+                    TODAY,
+                    AUTHOR,
+                    DEPARTMENT,
+                    REPORT_TITLE,
+                    report_html_path,
+                )

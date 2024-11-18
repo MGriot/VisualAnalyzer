@@ -3,6 +3,8 @@ import numpy as np
 import os
 from tqdm import tqdm
 from typing import Tuple, Dict, Any  # Import Tuple and Dict for type hinting
+import matplotlib.pyplot as plt
+from PIL import Image
 
 
 def get_average_color(image: np.ndarray) -> np.ndarray:
@@ -50,7 +52,9 @@ class ColorFinder:
         self.upper_limit = None
         self.center = None
 
-    def get_color_limits_from_dataset(self, dataset_path: str) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float, float]]:
+    def get_color_limits_from_dataset(
+        self, dataset_path: str
+    ) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float, float]]:
         """
         Calculate color limits (HSV) based on a dataset of images, removing outliers.
 
@@ -312,8 +316,12 @@ class ColorFinder:
         cv2.destroyAllWindows()
 
     def find_color_and_percentage(
-        self, image_path: str, save_images: bool = False, exclude_transparent: bool = False, output_dir: str = "processed_images"
-    ) -> Tuple[np.ndarray, Dict[str, Any], float, int, int, int]:
+        self,
+        image_path: str,
+        save_images: bool = False,
+        exclude_transparent: bool = False,
+        output_dir: str = "processed_images",
+    ) -> Tuple[np.ndarray, Dict[str, Any], float, int, int]:
         """
         Finds and highlights a color in an image and calculates the percentage of pixels matching that color.
 
@@ -326,91 +334,66 @@ class ColorFinder:
 
         Returns:
             tuple: A tuple containing the processed image with highlighted regions,
-               the selected color (dictionary with different color spaces),
-               the percentage of pixels matching the color,
-               the total number of pixels matching the color,
-               and the total number of pixels in the image (including or excluding transparent pixels based on exclude_transparent).
-               Returns None if the image cannot be loaded.
+                the selected color (dictionary with different color spaces),
+                the percentage of pixels matching the color,
+                the total number of pixels matching the color,
+                and the total number of pixels in the image (including or excluding transparent pixels based on exclude_transparent).
+                Returns None if the image cannot be loaded.
         """
+
         if self.lower_limit is None or self.upper_limit is None:
             raise ValueError(
                 "Color limits not set. Please use get_color_limits_from_dataset or get_color_limits_from_hsv to set the limits."
             )
 
-        image = cv2.imread(
-            image_path, cv2.IMREAD_UNCHANGED
-        )  # Read image with alpha channel if present
-        if image is None:
-            print(f"Error: Could not load image at {image_path}")
+        try:
+            # Open image with Pillow, handle potential errors
+            image = Image.open(image_path)
+            if exclude_transparent:
+                # Convert to RGBA for alpha channel access
+                image = image.convert("RGBA")
+
+                # Extract alpha channel, filter for non-transparent pixels
+                bgra = np.array(image)
+                if bgra.ndim == 4:  # Check if the image has an alpha channel
+                    # Apply transparency filter before reshaping
+                    non_transparent_pixels = bgra[bgra[:, :, 3] > 250]  # Threshold for transparency
+
+                    # Convert back to image mode
+                    image = Image.fromarray(non_transparent_pixels.astype(np.uint8))
+                    image = image.convert("RGB")  # Convert to RGB for OpenCV
+                    total_pixels = len(non_transparent_pixels)
+                else:
+                    image = np.asarray(image)
+                    total_pixels = image.shape[0] * image.shape[1]
+            else:
+                # Handle non-transparent or images without alpha channel
+                image = np.asarray(image)
+                total_pixels = image.shape[0] * image.shape[1]
+        except Exception as e:
+            print(f"Error: Could not load image at {image_path} ({e})")
             return None
 
-        image_height, image_width, _ = image.shape  # Get image dimensions
-        total_image_pixels = (
-            image_height * image_width
-        )  # Calculate total pixels before any potential masking
+        # Convert image to OpenCV format
+        image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
-        if exclude_transparent and image.shape[2] == 4:  # Check if image has alpha channel
-            # Extract alpha channel
-            bgra = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
-            b, g, r, alpha = cv2.split(bgra)
-            
-            bgr = cv2.merge((b, g, r)) # Merge BGR channels
-            hsv_image = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        image_height, image_width, _ = image.shape
 
-            # Create a mask for non-transparent pixels
-            non_transparent_mask = alpha > 0
+        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-            # Apply the non-transparent mask to the HSV image
-            hsv_image_masked = hsv_image[non_transparent_mask]
+        # Create a mask based on color limits
+        mask = cv2.inRange(hsv_image, self.lower_limit, self.upper_limit)
 
-            # Update total pixels count used for percentage calculation
-            total_pixels = np.count_nonzero(non_transparent_mask)
+        # Calculate percentage of matching pixels
+        matched_pixels = cv2.countNonZero(mask)
+        percentage = (matched_pixels / total_pixels) * 100
 
-            # Create a mask based on color limits from the full HSV image
-            mask = cv2.inRange(hsv_image, self.lower_limit, self.upper_limit)
-
-            # Calculate percentage (as in get_color_percentage)
-            matched_pixels = cv2.countNonZero(mask)
-            percentage = (matched_pixels / total_pixels) * 100
-
-            # Find contours and draw rectangles (as in process_image)
-            contours, _ = cv2.findContours(
-                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
-            for contour in contours:
-                if cv2.contourArea(contour) > 500:
-                    x, y, w, h = cv2.boundingRect(contour)
-                    bgr = cv2.rectangle(
-                        bgr, (x, y), (x + w, y + h), (0, 255, 0), 5
-                    )
-
-            # Merge BGR and alpha channels back
-            bgra = cv2.merge((bgr, alpha))
-
-            # Convert back to BGRA
-            image = cv2.cvtColor(bgra, cv2.COLOR_RGBA2BGRA)
-
-        else:
-            hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-            total_pixels = total_image_pixels  # use precalculated total pixels
-
-            # Create a mask based on color limits
-            mask = cv2.inRange(hsv_image, self.lower_limit, self.upper_limit)
-
-            # Find contours and draw rectangles (as in process_image)
-            contours, _ = cv2.findContours(
-                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
-            for contour in contours:
-                if cv2.contourArea(contour) > 500:
-                    x, y, w, h = cv2.boundingRect(contour)
-                    image = cv2.rectangle(
-                        image, (x, y), (x + w, y + h), (0, 255, 0), 5
-                    )
-
-            # Calculate percentage (as in get_color_percentage)
-            matched_pixels = cv2.countNonZero(mask)
-            percentage = (matched_pixels / total_pixels) * 100
+        # Find contours and draw rectangles
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            if cv2.contourArea(contour) > 500:
+                x, y, w, h = cv2.boundingRect(contour)
+                image = cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 5)
 
         selected_color_bgr = cv2.cvtColor(
             np.uint8([[self.lower_limit]]), cv2.COLOR_HSV2BGR
@@ -459,8 +442,7 @@ class ColorFinder:
                 selected_colors,
                 percentage,
                 matched_pixels,
-                image_width,
-                image_height,
+                total_pixels,
             )
 
         else:
@@ -469,8 +451,7 @@ class ColorFinder:
                 selected_colors,
                 percentage,
                 matched_pixels,
-                image_width,
-                image_height,
+                total_pixels,
             )  # Return original image if not saving
 
 
@@ -498,10 +479,12 @@ if __name__ == "__main__":
     image_path = r"C:\Users\Admin\Documents\Coding\VisualAnalyzer\.old\img\j.png"
     # color_finder.process_webcam()
     # color_finder.process_image(image_path)
-    results = color_finder.find_color_and_percentage(image_path, exclude_transparent=True)
+    results = color_finder.find_color_and_percentage(
+        image_path, exclude_transparent=True
+    )
 
     if results:
-        processed_image, selected_colors, percentage, matched_pixels = results
+        processed_image, selected_colors, percentage, matched_pixels, total_pixels = results
         print(f"Selected Colors: {selected_colors}")
         print(f"Percentage of matched pixels: {percentage:.2f}%")
         print(f"Number of matched pixels: {matched_pixels}")
