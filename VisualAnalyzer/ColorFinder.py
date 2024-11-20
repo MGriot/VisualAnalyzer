@@ -377,8 +377,6 @@ class ColorFinder:
         # Convert image to OpenCV format
         image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
-        image_height, image_width, _ = image.shape
-
         hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
         # Create a mask based on color limits
