@@ -3,13 +3,13 @@ import cv2
 import numpy as np
 from typing import Tuple, Dict, Any
 import matplotlib.pyplot as plt
-from PIL import Image, ImageFilter
+from PIL import Image
+from PIL import ImageFilter
 from scipy import stats
 import os
 from mpl_toolkits.mplot3d import Axes3D  # Import for 3D plotting
 from matplotlib.patches import Rectangle
-from matplotlib.colors import ListedColormap # Import for creating custom colormaps
-from scipy.stats import grubbs
+from matplotlib.colors import ListedColormap  # Import for creating custom colormaps
 
 
 def get_average_color(image: np.ndarray) -> np.ndarray:
@@ -27,7 +27,12 @@ def get_average_color(image: np.ndarray) -> np.ndarray:
     return average_color
 
 
-def remove_outliers(data: list, method: str = "zscore", threshold: float = 3.0, confidence_level: float = 0.95) -> Tuple[list, list]:
+def remove_outliers(
+    data: list,
+    method: str = "zscore",
+    threshold: float = 3.0,
+    confidence_level: float = 0.95,
+) -> Tuple[list, list]:
     """
     Remove outliers from a list of data using the specified method.
 
@@ -61,15 +66,30 @@ def remove_outliers(data: list, method: str = "zscore", threshold: float = 3.0, 
     elif method == "confidence_interval":
         mean = np.mean(data)
         sem = stats.sem(data)
-        interval = stats.t.interval(confidence_level, len(data) - 1, loc=mean, scale=sem)
+        interval = stats.t.interval(
+            confidence_level, len(data) - 1, loc=mean, scale=sem
+        )
         filtered_data = [x for x in data if interval[0] <= x <= interval[1]]
         outliers = [x for x in data if x < interval[0] or x > interval[1]]
     elif method == "grubbs":
-        # Grubbs' test requires the data to be an array
+        # Grubbs' test implementation provided by the user
         data_array = np.array(data)
-        result = grubbs.test(data_array, alpha=1 - confidence_level)
-        filtered_data = result.data[~result.outliers]
-        outliers = data_array[result.outliers]
+        mean = np.mean(data_array)
+        std_dev = np.std(data_array, ddof=1)
+        N = len(data_array)
+        G_calculated = max(abs(data_array - mean)) / std_dev
+        t_critical = stats.t.isf(0.025 / (2 * N), N - 2)
+        G_critical = ((N - 1) / np.sqrt(N)) * np.sqrt(
+            t_critical**2 / (N - 2 + t_critical**2)
+        )
+        if G_calculated > G_critical:
+            # Find the index of the outlier
+            outlier_index = np.argmax(abs(data_array - mean))
+            outliers = [data_array[outlier_index]]
+            filtered_data = np.delete(data_array, outlier_index).tolist()
+        else:
+            filtered_data = data
+            outliers = []
     else:
         raise ValueError("Invalid outlier removal method specified.")
     return filtered_data, outliers
@@ -80,7 +100,7 @@ def get_color_limits_from_dataset(
     outlier_removal_method: str = "zscore",
     outlier_removal_threshold: float = 3.0,
     show_plot: bool = False,
-    confidence_level: float = 0.95
+    confidence_level: float = 0.95,
 ) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float, float]]:
     """
     Calculate color limits (HSV) based on a dataset of images, removing outliers.
@@ -107,9 +127,24 @@ def get_color_limits_from_dataset(
             values.append(average_color[2])
 
     # Remove outliers
-    hues, outlier_hues = remove_outliers(hues, method=outlier_removal_method, threshold=outlier_removal_threshold, confidence_level=confidence_level)
-    saturations, outlier_saturations = remove_outliers(saturations, method=outlier_removal_method, threshold=outlier_removal_threshold, confidence_level=confidence_level)
-    values, outlier_values = remove_outliers(values, method=outlier_removal_method, threshold=outlier_removal_threshold, confidence_level=confidence_level)
+    hues, outlier_hues = remove_outliers(
+        hues,
+        method=outlier_removal_method,
+        threshold=outlier_removal_threshold,
+        confidence_level=confidence_level,
+    )
+    saturations, outlier_saturations = remove_outliers(
+        saturations,
+        method=outlier_removal_method,
+        threshold=outlier_removal_threshold,
+        confidence_level=confidence_level,
+    )
+    values, outlier_values = remove_outliers(
+        values,
+        method=outlier_removal_method,
+        threshold=outlier_removal_threshold,
+        confidence_level=confidence_level,
+    )
 
     lower_limit = np.array([min(hues), min(saturations), min(values)], dtype=np.uint8)
     upper_limit = np.array([max(hues), max(saturations), max(values)], dtype=np.uint8)
@@ -119,8 +154,11 @@ def get_color_limits_from_dataset(
         # Create the 3D scatter plot for inliers
         fig = plt.figure()
         ax = fig.add_subplot(111, projection="3d")
-        colors = [cv2.cvtColor(np.uint8([[[h, s, v]]]), cv2.COLOR_HSV2RGB)[0][0] / 255 for h, s, v in zip(hues, saturations, values)]
-        ax.scatter(hues, saturations, values, c=colors, label='Inliers')
+        colors = [
+            cv2.cvtColor(np.uint8([[[h, s, v]]]), cv2.COLOR_HSV2RGB)[0][0] / 255
+            for h, s, v in zip(hues, saturations, values)
+        ]
+        ax.scatter(hues, saturations, values, c=colors, label="Inliers")
 
         # Plot the outliers
         plot_outliers(outlier_hues, outlier_saturations, outlier_values, ax)
@@ -214,8 +252,18 @@ def plot_outliers(outlier_hues, outlier_saturations, outlier_values, ax):
         outlier_values (list): List of outlier value values.
         ax (Axes3D): The 3D axes object to plot on.
     """
-    outlier_colors = [cv2.cvtColor(np.uint8([[[h, s, v]]]), cv2.COLOR_HSV2RGB)[0][0] / 255 for h, s, v in zip(outlier_hues, outlier_saturations, outlier_values)]
-    ax.scatter(outlier_hues, outlier_saturations, outlier_values, c=outlier_colors, marker='x', label='Outliers')
+    outlier_colors = [
+        cv2.cvtColor(np.uint8([[[h, s, v]]]), cv2.COLOR_HSV2RGB)[0][0] / 255
+        for h, s, v in zip(outlier_hues, outlier_saturations, outlier_values)
+    ]
+    ax.scatter(
+        outlier_hues,
+        outlier_saturations,
+        outlier_values,
+        c=outlier_colors,
+        marker="x",
+        label="Outliers",
+    )
 
 
 class ColorFinder:
@@ -238,7 +286,7 @@ class ColorFinder:
         adaptive_thresholding: bool = False,
         apply_morphology: bool = False,
         apply_blur: bool = False,
-        blur_radius: int = 2
+        blur_radius: int = 2,
     ) -> Tuple[np.ndarray, Dict[str, Any], int, int, np.ndarray, int]:
         """
         Finds a color in an image and highlights it.
@@ -274,23 +322,24 @@ class ColorFinder:
             bgra = np.array(image)
             if bgra.ndim == 4:  # Check if the image has an alpha channel
                 # Apply transparency filter before reshaping
-                non_transparent_pixels = bgra[bgra[:, :, 3] > 250]  # Threshold for transparency
+                non_transparent_pixels = bgra[
+                    bgra[:, :, 3] > 250
+                ]  # Threshold for transparency
 
                 # Convert back to image mode
                 image = Image.fromarray(non_transparent_pixels.astype(np.uint8))
                 image = image.convert("RGB")  # Convert to RGB for OpenCV
                 total_pixels = len(non_transparent_pixels)
             else:
-                image = np.asarray(image)
-                total_pixels = image.shape[0] * image.shape[1]
+                # Handle images without alpha channel
+                total_pixels = image.width * image.height
         else:
             # Handle non-transparent or images without alpha channel
-            image = np.asarray(image)
-            total_pixels = image.shape[0] * image.shape[1]
+            total_pixels = image.width * image.height
 
         # Apply blur if requested
         if apply_blur:
-            image = blur_image(Image.fromarray(image), blur_radius)
+            image = blur_image(image, blur_radius)
 
         # Convert image to OpenCV format
         image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
@@ -300,7 +349,9 @@ class ColorFinder:
         # Apply adaptive thresholding if requested
         if adaptive_thresholding:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            mask = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+            mask = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+            )
         else:
             # Create a mask based on color limits
             mask = cv2.inRange(hsv_image, self.lower_limit, self.upper_limit)
@@ -343,7 +394,14 @@ class ColorFinder:
         # Count non-selected pixels
         non_selected_pixel_count = cv2.countNonZero(inverted_mask)
 
-        return image, selected_colors, matched_pixels, total_pixels, average_non_selected_color, non_selected_pixel_count
+        return (
+            image,
+            selected_colors,
+            matched_pixels,
+            total_pixels,
+            average_non_selected_color,
+            non_selected_pixel_count,
+        )
 
     def calculate_percentage(self, matched_pixels: int, total_pixels: int) -> float:
         """
@@ -365,7 +423,7 @@ class ColorFinder:
         adaptive_thresholding: bool = False,
         apply_morphology: bool = False,
         apply_blur: bool = False,
-        blur_radius: int = 2
+        blur_radius: int = 2,
     ) -> Tuple[np.ndarray, Dict[str, Any], float, int, int, np.ndarray, int]:
         """
         Finds and highlights a color in an image and calculates the percentage of pixels matching that color.
@@ -396,12 +454,32 @@ class ColorFinder:
             print(f"Error: Could not load image at {image_path} ({e})")
             return None
 
-        image, selected_colors, matched_pixels, total_pixels, average_non_selected_color, non_selected_pixel_count = self.find_color(
-            image, exclude_transparent, adaptive_thresholding, apply_morphology, apply_blur, blur_radius
+        (
+            image,
+            selected_colors,
+            matched_pixels,
+            total_pixels,
+            average_non_selected_color,
+            non_selected_pixel_count,
+        ) = self.find_color(
+            image,
+            exclude_transparent,
+            adaptive_thresholding,
+            apply_morphology,
+            apply_blur,
+            blur_radius,
         )
         percentage = self.calculate_percentage(matched_pixels, total_pixels)
 
-        return image, selected_colors, percentage, matched_pixels, total_pixels, average_non_selected_color, non_selected_pixel_count
+        return (
+            image,
+            selected_colors,
+            percentage,
+            matched_pixels,
+            total_pixels,
+            average_non_selected_color,
+            non_selected_pixel_count,
+        )
 
 
 def test_threshold_values(
@@ -412,7 +490,7 @@ def test_threshold_values(
     adaptive_thresholding: bool = False,
     apply_morphology: bool = False,
     apply_blur: bool = False,
-    blur_radius: int = 2
+    blur_radius: int = 2,
 ):
     """
     Tests different threshold values and displays the results.
@@ -443,8 +521,21 @@ def test_threshold_values(
     color_finder.upper_limit = upper_limit
 
     # Find the color and calculate the percentage
-    processed_image, _, _, _, _, average_non_selected_color, non_selected_pixel_count = color_finder.find_color_and_percentage(
-        image_path, exclude_transparent, adaptive_thresholding, apply_morphology, apply_blur, blur_radius
+    (
+        processed_image,
+        _,
+        _,
+        _,
+        _,
+        average_non_selected_color,
+        non_selected_pixel_count,
+    ) = color_finder.find_color(
+        image,
+        exclude_transparent,
+        adaptive_thresholding,
+        apply_morphology,
+        apply_blur,
+        blur_radius,
     )
 
     # Display the original image, mask, and processed image
@@ -466,8 +557,10 @@ if __name__ == "__main__":
 
     # Set color limits using either method:
     # 1. From dataset:
-    dataset_path = 'img\\database'  #"path/to/your/dataset"
-    lower_limit, upper_limit, center = get_color_limits_from_dataset(dataset_path, show_plot=True, outlier_removal_method='grubbs')
+    dataset_path = "img\\database"  # "path/to/your/dataset"
+    lower_limit, upper_limit, center = get_color_limits_from_dataset(
+        dataset_path, show_plot=True, outlier_removal_method="grubbs"
+    )
     color_finder.lower_limit = lower_limit
     color_finder.upper_limit = upper_limit
     color_finder.center = center
@@ -487,10 +580,24 @@ if __name__ == "__main__":
     image_path = r"C:\Users\Admin\Documents\Coding\VisualAnalyzer\.old\img\j.png"
     # color_finder.process_webcam()
     # color_finder.process_image(image_path)
-    results = color_finder.find_color_and_percentage(image_path, exclude_transparent=True, adaptive_thresholding=True, apply_morphology=True, apply_blur=True)
+    results = color_finder.find_color_and_percentage(
+        image_path,
+        exclude_transparent=True,
+        adaptive_thresholding=True,
+        apply_morphology=True,
+        apply_blur=True,
+    )
 
     if results:
-        processed_image, selected_colors, percentage, matched_pixels, total_pixels, average_non_selected_color, non_selected_pixel_count = results
+        (
+            processed_image,
+            selected_colors,
+            percentage,
+            matched_pixels,
+            total_pixels,
+            average_non_selected_color,
+            non_selected_pixel_count,
+        ) = results
         print(f"Selected Colors: {selected_colors}")
         print(f"Percentage of matched pixels: {percentage:.2f}%")
         print(f"Number of matched pixels: {matched_pixels}")
@@ -501,4 +608,12 @@ if __name__ == "__main__":
         cv2.destroyAllWindows()
 
     # Test different threshold values
-    test_threshold_values(image_path, lower_limit, upper_limit, exclude_transparent=True, adaptive_thresholding=False, apply_morphology=False, apply_blur=True)
+    test_threshold_values(
+        image_path,
+        lower_limit,
+        upper_limit,
+        exclude_transparent=True,
+        adaptive_thresholding=False,
+        apply_morphology=False,
+        apply_blur=True,
+    )
