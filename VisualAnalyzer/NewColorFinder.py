@@ -1,27 +1,17 @@
-# pylint: disable=no-member
 import cv2
 import numpy as np
 from typing import Tuple, Dict, Any
 import matplotlib.pyplot as plt
-from PIL import Image
-from PIL import ImageFilter
+from PIL import Image, ImageFilter
 from scipy import stats
 import os
-from mpl_toolkits.mplot3d import Axes3D  # Import for 3D plotting
+import pickle
+from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.patches import Rectangle
-from matplotlib.colors import ListedColormap  # Import for creating custom colormaps
 
 
 def get_average_color(image: np.ndarray) -> np.ndarray:
-    """
-    Calculate the average color of an image.
-
-    Parameters:
-    image (numpy.ndarray): The input image.
-
-    Returns:
-    numpy.ndarray: The average color of the image.
-    """
+    """Calculate the average color of an image."""
     average_color_per_row = np.average(image, axis=0)
     average_color = np.average(average_color_per_row, axis=0)
     return average_color
@@ -33,18 +23,7 @@ def remove_outliers(
     threshold: float = 3.0,
     confidence_level: float = 0.95,
 ) -> Tuple[list, list]:
-    """
-    Remove outliers from a list of data using the specified method.
-
-    Parameters:
-    data (list): The input data.
-    method (str): The method to use for outlier removal. Options: 'zscore', 'iqr', 'stddev', 'confidence_interval', 'grubbs'. Default: 'zscore'.
-    threshold (float): The threshold for outlier removal. Default: 3.0.
-    confidence_level (float): The confidence level for the confidence interval method. Default: 0.95.
-
-    Returns:
-    tuple: A tuple containing the filtered data and the outliers.
-    """
+    """Remove outliers from a list of data using the specified method."""
     if method == "zscore":
         z = np.abs(stats.zscore(data))
         filtered_data = [x for i, x in enumerate(data) if z[i] < threshold]
@@ -72,7 +51,6 @@ def remove_outliers(
         filtered_data = [x for x in data if interval[0] <= x <= interval[1]]
         outliers = [x for x in data if x < interval[0] or x > interval[1]]
     elif method == "grubbs":
-        # Grubbs' test implementation provided by the user
         data_array = np.array(data)
         mean = np.mean(data_array)
         std_dev = np.std(data_array, ddof=1)
@@ -83,7 +61,6 @@ def remove_outliers(
             t_critical**2 / (N - 2 + t_critical**2)
         )
         if G_calculated > G_critical:
-            # Find the index of the outlier
             outlier_index = np.argmax(abs(data_array - mean))
             outliers = [data_array[outlier_index]]
             filtered_data = np.delete(data_array, outlier_index).tolist()
@@ -102,19 +79,7 @@ def get_color_limits_from_dataset(
     show_plot: bool = False,
     confidence_level: float = 0.95,
 ) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float, float]]:
-    """
-    Calculate color limits (HSV) based on a dataset of images, removing outliers.
-
-    Parameters:
-    dataset_path (str): The path to the dataset of images.
-    outlier_removal_method (str): The method to use for outlier removal. Options: 'zscore', 'iqr', 'stddev', 'confidence_interval', 'grubbs'. Default: 'zscore'.
-    outlier_removal_threshold (float): The threshold for outlier removal. Default: 3.0.
-    show_plot (bool): Whether to display a 3D scatter plot of the colors in the dataset. Default: False.
-    confidence_level (float): The confidence level for the confidence interval and Grubbs' test methods. Default: 0.95.
-
-    Returns:
-    tuple: The lower and upper color limits in HSV, and the center of the distribution.
-    """
+    """Calculate color limits (HSV) based on a dataset of images, removing outliers."""
     hues, saturations, values = [], [], []
     for filename in os.listdir(dataset_path):
         if filename.endswith((".jpg", ".png")):
@@ -126,20 +91,19 @@ def get_color_limits_from_dataset(
             saturations.append(average_color[1])
             values.append(average_color[2])
 
-    # Remove outliers
-    hues, outlier_hues = remove_outliers(
+    hues, _ = remove_outliers(
         hues,
         method=outlier_removal_method,
         threshold=outlier_removal_threshold,
         confidence_level=confidence_level,
     )
-    saturations, outlier_saturations = remove_outliers(
+    saturations, _ = remove_outliers(
         saturations,
         method=outlier_removal_method,
         threshold=outlier_removal_threshold,
         confidence_level=confidence_level,
     )
-    values, outlier_values = remove_outliers(
+    values, _ = remove_outliers(
         values,
         method=outlier_removal_method,
         threshold=outlier_removal_threshold,
@@ -151,68 +115,71 @@ def get_color_limits_from_dataset(
     center = (np.mean(hues), np.mean(saturations), np.mean(values))
 
     if show_plot:
-        # Create the 3D scatter plot for inliers
         fig = plt.figure()
         ax = fig.add_subplot(111, projection="3d")
         colors = [
             cv2.cvtColor(np.uint8([[[h, s, v]]]), cv2.COLOR_HSV2RGB)[0][0] / 255
             for h, s, v in zip(hues, saturations, values)
         ]
-        ax.scatter(hues, saturations, values, c=colors, label="Inliers")
-
-        # Plot the outliers
-        plot_outliers(outlier_hues, outlier_saturations, outlier_values, ax)
-
+        ax.scatter(hues, saturations, values, c=colors, label="dataset")
         ax.set_xlabel("Hue")
         ax.set_ylabel("Saturation")
         ax.set_zlabel("Value")
         plt.title("Color Distribution Scatter Plot")
         plt.legend()
-
-        # Create the color space rectangle plot
         generate_color_space_plot(lower_limit, upper_limit, center)
-
         plt.show()
 
     return lower_limit, upper_limit, center
 
 
 def generate_color_space_plot(
-    lower_limit, upper_limit, center, gradient_height=25, num_lines=5, output_dir="."
+    lower_limit, upper_limit, center, gradient_height=25, num_lines=5
 ):
-    """
-    Generates and saves a color space plot with a customizable gradient.
+    """Generates and displays a color space plot with a customizable gradient,
+    including individual channel gradients for HSV."""
+    lower_rgb = cv2.cvtColor(np.uint8([[lower_limit]]), cv2.COLOR_HSV2BGR)[0][0]
+    upper_rgb = cv2.cvtColor(np.uint8([[upper_limit]]), cv2.COLOR_HSV2BGR)[0][0]
+    center_rgb = cv2.cvtColor(np.uint8([[center]]), cv2.COLOR_HSV2RGB)[0][0]
 
-    Args:
-        lower_limit (np.ndarray): Lower HSV color limit.
-        upper_limit (np.ndarray): Upper HSV color limit.
-        center (tuple): Center HSV color.
-        gradient_height (int, optional): Height of the gradient in pixels. Defaults to 25.
-        num_lines (int, optional): Number of gradient lines to stack. Defaults to 5.
-        output_dir (str, optional): Directory to save the plot. Defaults to current directory.
-    """
-
-    # Create a gradient from lower to upper limit
-    lower_rgb = cv2.cvtColor(np.uint8([[lower_limit]]), cv2.COLOR_HSV2BGR)
-    lower_rgb = lower_rgb[0][0]
-    upper_rgb = cv2.cvtColor(np.uint8([[upper_limit]]), cv2.COLOR_HSV2BGR)
-    upper_rgb = upper_rgb[0][0]
-    center_rgb = cv2.cvtColor(np.uint8([[center]]), cv2.COLOR_HSV2RGB)
-    center_rgb = center_rgb[0][0]
-
-    gradient = np.linspace(lower_rgb, upper_rgb, 256)
-    gradient = gradient / 255  # Normalize to 0-1 range
-
-    # Create the gradient with desired height and lines
+    gradient = np.linspace(lower_rgb, upper_rgb, 256) / 255
     gradient_resized = np.repeat(gradient.reshape(1, -1, 3), gradient_height, axis=0)
     gradient_stacked = np.vstack([gradient_resized] * num_lines)
 
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(10, 3))
-    ax.imshow(gradient_stacked)
-    ax.axis("off")
+    # Create individual HSV channel gradients
+    hsv_lower = np.array([lower_limit])
+    hsv_upper = np.array([upper_limit])
+    h_gradient = np.linspace(hsv_lower[:, 0], hsv_upper[:, 0], 256).reshape(1, -1, 1)
+    s_gradient = np.linspace(hsv_lower[:, 1], hsv_upper[:, 1], 256).reshape(1, -1, 1)
+    v_gradient = np.linspace(hsv_lower[:, 2], hsv_upper[:, 2], 256).reshape(1, -1, 1)
 
-    # Highlight the center color with a filled rectangle
+    # Normalize and repeat for visualization
+    h_gradient_vis = np.repeat(h_gradient / 179, gradient_height, axis=0)  # Hue is 0-179
+    s_gradient_vis = np.repeat(s_gradient / 255, gradient_height, axis=0)
+    v_gradient_vis = np.repeat(v_gradient / 255, gradient_height, axis=0)
+
+
+
+    fig, axes = plt.subplots(4, 1, figsize=(10, 12))  # 4 subplots now
+
+    axes[0].imshow(gradient_stacked)
+    axes[0].axis("off")
+    axes[0].set_title("Combined RGB Gradient")
+
+    axes[1].imshow(h_gradient_vis, cmap='hsv', vmin=0, vmax=1)  # Use hsv cmap for Hue
+    axes[1].axis("off")
+    axes[1].set_title("Hue (H) Gradient")
+
+    axes[2].imshow(s_gradient_vis, cmap='gray')
+    axes[2].axis("off")
+    axes[2].set_title("Saturation (S) Gradient")
+
+    axes[3].imshow(v_gradient_vis, cmap='gray')
+    axes[3].axis("off")
+    axes[3].set_title("Value (V) Gradient")
+
+
+
     center_x = np.interp(center[0], [lower_limit[0], upper_limit[0]], [0, 256])
     rect_width = 2
     rect = Rectangle(
@@ -223,35 +190,38 @@ def generate_color_space_plot(
         edgecolor="none",
         facecolor=center_rgb / 255,
     )
-    ax.add_patch(rect)
+    axes[0].add_patch(rect) # Add rect to the correct axes
 
+    plt.tight_layout() # Adjust layout to prevent overlap
     plt.show()
 
 
 def blur_image(image: Image.Image, blur_radius: int = 2) -> Image.Image:
-    """
-    Blurs the input image using a Gaussian filter.
-
-    Parameters:
-        image (Image.Image): The input image.
-        blur_radius (int): The radius for the Gaussian blur.
-
-    Returns:
-        Image.Image: The blurred image.
-    """
+    """Blurs the input image using a Gaussian filter."""
     return image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
 
 def plot_outliers(outlier_hues, outlier_saturations, outlier_values, ax):
-    """
-    Plots the outlier colors in a 3D scatter plot.
+    """Plots the outlier colors in a 3D scatter plot."""
+    outlier_colors = [
+        cv2.cvtColor(np.uint8([[[h, s, v]]]), cv2.COLOR_HSV2RGB)[0][0] / 255
+        for h, s, v in zip(outlier_hues, outlier_saturations, outlier_values)
+    ]
+    ax.scatter(
+        outlier_hues,
+        outlier_saturations,
+        outlier_values,
+        c=outlier_colors,
+        marker="x",
+        label="Outliers",
+    )
 
-    Parameters:
-        outlier_hues (list): List of outlier hue values.
-        outlier_saturations (list): List of outlier saturation values.
-        outlier_values (list): List of outlier value values.
-        ax (Axes3D): The 3D axes object to plot on.
-    """
+
+def blur_image(image: Image.Image, blur_radius: int = 2) -> Image.Image:
+    return image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+
+def plot_outliers(outlier_hues, outlier_saturations, outlier_values, ax):
     outlier_colors = [
         cv2.cvtColor(np.uint8([[[h, s, v]]]), cv2.COLOR_HSV2RGB)[0][0] / 255
         for h, s, v in zip(outlier_hues, outlier_saturations, outlier_values)
@@ -267,14 +237,10 @@ def plot_outliers(outlier_hues, outlier_saturations, outlier_values, ax):
 
 
 class ColorFinder:
-    """
-    A class to find and highlight specific colors in images and video streams.
-    """
+    """A class to find and highlight specific colors in images and video streams."""
 
     def __init__(self):
-        """
-        Initialize the ColorFinder with no base color. Color limits will be set later.
-        """
+        """Initialize the ColorFinder with no base color."""
         self.lower_limit = None
         self.upper_limit = None
         self.center = None
@@ -288,84 +254,43 @@ class ColorFinder:
         apply_blur: bool = False,
         blur_radius: int = 2,
     ) -> Tuple[np.ndarray, Dict[str, Any], int, int, np.ndarray, int]:
-        """
-        Finds a color in an image and highlights it.
-
-        Parameters:
-            image (np.ndarray): The input image.
-            exclude_transparent (bool): Whether to exclude transparent pixels from the calculation.
-            adaptive_thresholding (bool): Whether to apply adaptive thresholding to the image.
-            apply_morphology (bool): Whether to apply morphological operations to the mask.
-            apply_blur (bool): Whether to apply Gaussian blur to the image.
-            blur_radius (int): The radius for the Gaussian blur.
-
-        Returns:
-            tuple: A tuple containing the processed image with highlighted regions,
-                the selected color (dictionary with different color spaces),
-                the total number of pixels matching the color,
-                the total number of pixels in the image,
-                the average color of non-selected pixels,
-                and the count of non-selected pixels.
-                Returns None if the image cannot be loaded.
-        """
-
+        """Finds a color in an image and highlights it."""
         if self.lower_limit is None or self.upper_limit is None:
-            raise ValueError(
-                "Color limits not set. Please use get_color_limits_from_dataset or get_color_limits_from_hsv to set the limits."
-            )
+            raise ValueError("Color limits not set.")
 
         if exclude_transparent:
-            # Convert to RGBA for alpha channel access
             image = image.convert("RGBA")
-
-            # Extract alpha channel, filter for non-transparent pixels
             bgra = np.array(image)
-            if bgra.ndim == 4:  # Check if the image has an alpha channel
-                # Apply transparency filter before reshaping
-                non_transparent_pixels = bgra[
-                    bgra[:, :, 3] > 250
-                ]  # Threshold for transparency
-
-                # Convert back to image mode
+            if bgra.ndim == 4:
+                non_transparent_pixels = bgra[bgra[:, :, 3] > 250]
                 image = Image.fromarray(non_transparent_pixels.astype(np.uint8))
-                image = image.convert("RGB")  # Convert to RGB for OpenCV
+                image = image.convert("RGB")
                 total_pixels = len(non_transparent_pixels)
             else:
-                # Handle images without alpha channel
                 total_pixels = image.width * image.height
         else:
-            # Handle non-transparent or images without alpha channel
             total_pixels = image.width * image.height
 
-        # Apply blur if requested
         if apply_blur:
             image = blur_image(image, blur_radius)
 
-        # Convert image to OpenCV format
         image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
         hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-        # Apply adaptive thresholding if requested
         if adaptive_thresholding:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             mask = cv2.adaptiveThreshold(
                 gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
             )
         else:
-            # Create a mask based on color limits
             mask = cv2.inRange(hsv_image, self.lower_limit, self.upper_limit)
 
-        # Apply morphological operations if requested
         if apply_morphology:
             kernel = np.ones((5, 5), np.uint8)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-        # Calculate percentage of matching pixels
         matched_pixels = cv2.countNonZero(mask)
-
-        # Find contours and draw rectangles
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for contour in contours:
             if cv2.contourArea(contour) > 500:
@@ -386,12 +311,9 @@ class ColorFinder:
             "RGB": selected_color_rgb,
         }
 
-        # Calculate average color of non-selected pixels
         inverted_mask = cv2.bitwise_not(mask)
         non_selected_pixels = cv2.bitwise_and(image, image, mask=inverted_mask)
         average_non_selected_color = get_average_color(non_selected_pixels)
-
-        # Count non-selected pixels
         non_selected_pixel_count = cv2.countNonZero(inverted_mask)
 
         return (
@@ -404,16 +326,7 @@ class ColorFinder:
         )
 
     def calculate_percentage(self, matched_pixels: int, total_pixels: int) -> float:
-        """
-        Calculates the percentage of matched pixels.
-
-        Parameters:
-            matched_pixels (int): Number of matched pixels.
-            total_pixels (int): Total number of pixels.
-
-        Returns:
-            float: The percentage of matched pixels.
-        """
+        """Calculates the percentage of matched pixels."""
         return (matched_pixels / total_pixels) * 100
 
     def find_color_and_percentage(
@@ -425,30 +338,8 @@ class ColorFinder:
         apply_blur: bool = False,
         blur_radius: int = 2,
     ) -> Tuple[np.ndarray, Dict[str, Any], float, int, int, np.ndarray, int]:
-        """
-        Finds and highlights a color in an image and calculates the percentage of pixels matching that color.
-
-        Parameters:
-            image_path (str): The path to the input image.
-            exclude_transparent (bool): Whether to exclude transparent pixels from the calculation.
-            adaptive_thresholding (bool): Whether to apply adaptive thresholding to the image.
-            apply_morphology (bool): Whether to apply morphological operations to the mask.
-            apply_blur (bool): Whether to apply Gaussian blur to the image.
-            blur_radius (int): The radius for the Gaussian blur.
-
-        Returns:
-            tuple: A tuple containing the processed image with highlighted regions,
-                the selected color (dictionary with different color spaces),
-                the percentage of pixels matching the color,
-                the total number of pixels matching the color,
-                the total number of pixels in the image,
-                the average color of non-selected pixels,
-                and the count of non-selected pixels.
-                Returns None if the image cannot be loaded.
-        """
-
+        """Finds and highlights a color in an image and calculates the percentage of pixels matching that color."""
         try:
-            # Open image with Pillow, handle potential errors
             image = Image.open(image_path)
         except Exception as e:
             print(f"Error: Could not load image at {image_path} ({e})")
@@ -481,139 +372,162 @@ class ColorFinder:
             non_selected_pixel_count,
         )
 
+    def plot_and_save_results(
+        self,
+        original_image: np.ndarray,
+        processed_image: np.ndarray,
+        mask: np.ndarray,
+        percentage: float,
+        matched_pixels: int,
+        total_pixels: int,
+        output_dir: str = ".",
+        save: bool = False,
+        show: bool = True,
+    ):
+        """Plots and/or saves the original image, processed image, mask, pie chart, and bar chart."""
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
 
-def test_threshold_values(
-    image_path: str,
-    lower_limit: np.ndarray,
-    upper_limit: np.ndarray,
-    exclude_transparent: bool = False,
-    adaptive_thresholding: bool = False,
-    apply_morphology: bool = False,
-    apply_blur: bool = False,
-    blur_radius: int = 2,
-):
-    """
-    Tests different threshold values and displays the results.
+        # Convert images to RGB for plotting
+        original_image_rgb = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
+        processed_image_rgb = cv2.cvtColor(processed_image, cv2.COLOR_BGR2RGB)
 
-    Parameters:
-        image_path (str): The path to the input image.
-        lower_limit (np.ndarray): Lower HSV color limit.
-        upper_limit (np.ndarray): Upper HSV color limit.
-        exclude_transparent (bool): Whether to exclude transparent pixels from the calculation.
-        adaptive_thresholding (bool): Whether to apply adaptive thresholding to the image.
-        apply_morphology (bool): Whether to apply morphological operations to the mask.
-        apply_blur (bool): Whether to apply Gaussian blur to the image.
-        blur_radius (int): The radius for the Gaussian blur.
-    """
-    try:
-        # Open image with Pillow
-        image = Image.open(image_path)
-    except Exception as e:
-        print(f"Error: Could not load image at {image_path} ({e})")
-        return
+        # Create a mask in RGB for visualization
+        mask_rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
 
-    # Convert image to OpenCV format
-    image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        # Plot original image
+        plt.figure(figsize=(16, 12))
+        plt.subplot(2, 2, 1)
+        plt.imshow(original_image_rgb)
+        plt.title("Original Image")
+        plt.axis("off")
 
-    # Create a ColorFinder instance and set the color limits
-    color_finder = ColorFinder()
-    color_finder.lower_limit = lower_limit
-    color_finder.upper_limit = upper_limit
+        # Plot processed image
+        plt.subplot(2, 2, 2)
+        plt.imshow(processed_image_rgb)
+        plt.title("Processed Image")
+        plt.axis("off")
 
-    # Find the color and calculate the percentage
-    (
-        processed_image,
-        _,
-        _,
-        _,
-        _,
-        average_non_selected_color,
-        non_selected_pixel_count,
-    ) = color_finder.find_color(
-        image,
-        exclude_transparent,
-        adaptive_thresholding,
-        apply_morphology,
-        apply_blur,
-        blur_radius,
-    )
+        # Plot mask
+        plt.subplot(2, 2, 3)
+        plt.imshow(mask_rgb)
+        plt.title("Mask (Black and White)")
+        plt.axis("off")
 
-    # Display the original image, mask, and processed image
-    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv_image, lower_limit, upper_limit)
-    cv2.imshow("Original Image", image)
-    cv2.imshow("Mask", mask)
-    cv2.imshow("Processed Image", processed_image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+        # Plot pie chart
+        plt.subplot(2, 2, 4)
+        labels = ["Matched Pixels", "Non-Matched Pixels"]
+        sizes = [matched_pixels, total_pixels - matched_pixels]
+        center_rgb = (
+            cv2.cvtColor(
+                np.uint8(
+                    [[[int(self.center[0]), int(self.center[1]), int(self.center[2])]]]
+                ),
+                cv2.COLOR_HSV2RGB,
+            )[0][0]
+            / 255
+        )
+        colors = [center_rgb, "#41424C"]
+        plt.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=140)
+        plt.title("Pixel Distribution")
 
-    print(f"Average color of non-selected pixels: {average_non_selected_color}")
-    print(f"Count of non-selected pixels: {non_selected_pixel_count}")
+        # Save the plots
+        if save:
+            plt.savefig(os.path.join(output_dir, "results.png"), bbox_inches="tight")
+
+        # Show the plots
+        if show:
+            plt.show()
+
+        # Plot bar chart
+        plt.figure(figsize=(8, 6))
+        labels = ["Matched Pixels", "Non-Matched Pixels"]
+        sizes = [matched_pixels, total_pixels - matched_pixels]
+
+        colors = [center_rgb, "#41424C"]
+        plt.bar(labels, sizes, color=colors)
+        plt.title("Pixel Distribution")
+        plt.ylabel("Number of Pixels")
+        plt.ylim(0, total_pixels)
+
+        # Save the bar chart
+        if save:
+            plt.savefig(os.path.join(output_dir, "bar_chart.png"), bbox_inches="tight")
+
+        # Show the bar chart
+        if show:
+            plt.show()
+
+
+# Save the ColorFinder object and color range
+def save_color_finder(color_finder, filename="color_finder.pkl"):
+    data = {
+        "lower_limit": color_finder.lower_limit,
+        "upper_limit": color_finder.upper_limit,
+        "center": color_finder.center,
+        "color_finder": color_finder,
+    }
+    with open(filename, "wb") as f:
+        pickle.dump(data, f)
+
+
+# Load the ColorFinder object and color range
+def load_color_finder(filename="color_finder.pkl"):
+    with open(filename, "rb") as f:
+        data = pickle.load(f)
+    color_finder = data["color_finder"]
+    color_finder.lower_limit = data["lower_limit"]
+    color_finder.upper_limit = data["upper_limit"]
+    color_finder.center = data["center"]
+    return color_finder
 
 
 if __name__ == "__main__":
-    # Example usage:
     color_finder = ColorFinder()
-
-    # Set color limits using either method:
-    # 1. From dataset:
-    dataset_path = "img\\database"  # "path/to/your/dataset"
-    lower_limit, upper_limit, center = get_color_limits_from_dataset(
-        dataset_path, show_plot=True, outlier_removal_method="grubbs"
+    dataset_path_main = "img\\database"
+    lower_limit_main, upper_limit_main, center_main = get_color_limits_from_dataset(
+        dataset_path_main, show_plot=True, outlier_removal_method="grubbs"
     )
-    color_finder.lower_limit = lower_limit
-    color_finder.upper_limit = upper_limit
-    color_finder.center = center
+    color_finder.lower_limit = lower_limit_main
+    color_finder.upper_limit = upper_limit_main
+    color_finder.center = center_main
 
-    # 2. From HSV:
-    # base_color = (30, 255, 255)
-    # hue_percentage = 3
-    # saturation_percentage = 70
-    # value_percentage = 70
-    # lower_limit, upper_limit, center = color_finder.get_color_limits_from_hsv(
-    #     base_color, hue_percentage, saturation_percentage, value_percentage
-    # )
-    # print(f"Lower Limit: {lower_limit}")
-    # print(f"Upper Limit: {upper_limit}")
-    # print(f"Center: {center}")
-
-    image_path = r"C:\Users\Admin\Documents\Coding\VisualAnalyzer\.old\img\j.png"
-    # color_finder.process_webcam()
-    # color_finder.process_image(image_path)
-    results = color_finder.find_color_and_percentage(
-        image_path,
+    image_path_main = r"C:\Users\Admin\Documents\Coding\VisualAnalyzer\.old\img\j.png"
+    results_main = color_finder.find_color_and_percentage(
+        image_path_main,
         exclude_transparent=True,
-        adaptive_thresholding=True,
+        adaptive_thresholding=False,
         apply_morphology=True,
         apply_blur=True,
     )
 
-    if results:
+    if results_main:
         (
-            processed_image,
-            selected_colors,
-            percentage,
-            matched_pixels,
-            total_pixels,
-            average_non_selected_color,
-            non_selected_pixel_count,
-        ) = results
-        print(f"Selected Colors: {selected_colors}")
-        print(f"Percentage of matched pixels: {percentage:.2f}%")
-        print(f"Number of matched pixels: {matched_pixels}")
-        print(f"Average color of non-selected pixels: {average_non_selected_color}")
-        print(f"Count of non-selected pixels: {non_selected_pixel_count}")
-        cv2.imshow("Processed Image", processed_image)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+            processed_image_main,
+            selected_colors_main,
+            percentage_main,
+            matched_pixels_main,
+            total_pixels_main,
+            average_non_selected_color_main,
+            non_selected_pixel_count_main,
+        ) = results_main
 
-    # Test different threshold values
-    test_threshold_values(
-        image_path,
-        lower_limit,
-        upper_limit,
-        exclude_transparent=True,
-        adaptive_thresholding=False,
-        apply_morphology=False,
-        apply_blur=True,
-    )
+        original_image_main = cv2.imread(image_path_main)
+        hsv_image_main = cv2.cvtColor(processed_image_main, cv2.COLOR_BGR2HSV)
+        mask_main = cv2.inRange(
+            hsv_image_main, color_finder.lower_limit, color_finder.upper_limit
+        )
+
+        # ... (print statements)
+
+        color_finder.plot_and_save_results(
+            original_image_main,
+            processed_image_main,
+            mask_main,
+            percentage_main,
+            matched_pixels_main,
+            total_pixels_main,
+            output_dir="output",
+            save=False,
+            show=True,
+        )
