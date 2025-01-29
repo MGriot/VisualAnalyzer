@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from PIL import Image
 from typing import Tuple, Dict, Any, List
 import matplotlib.pyplot as plt
 from PIL import Image, ImageFilter
@@ -9,21 +10,20 @@ import pickle
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.patches import Rectangle
 
-class ColorFinder:
-    """A class to find and highlight specific colors in images and video streams."""
+def analyze_colors_from_image(image_path):
+    """
+    Analyzes colors in an image, detects rectangular shapes,
+    and extracts colors in top-left to bottom-right order.
 
-    def __init__(self):
-        """Initialize the ColorFinder with no base color."""
-        self.lower_limit = None
-        self.upper_limit = None
-        self.center = None
-        self.original_image = None
-        self.processed_image = None
-        self.mask = None
-        self.initial_mask = None
+    Args:
+        image_path (str): Path to the image file.
+
+    Returns:
+        list: List of colors in RGB format, ordered top-left to bottom-right.
+              Returns None if no shapes are detected or an error occurs.
         self.matched_pixels = None
         self.total_pixels = None
-
+"""
     def find_color(
         self,
         image: np.ndarray,

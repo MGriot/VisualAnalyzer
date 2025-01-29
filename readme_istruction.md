@@ -177,3 +177,15 @@ The `Templates/Report.html` file is a Jinja2 template used by `report.py` to gen
 ## Conclusion
 
 This documentation provides a detailed overview of the VisualAnalyzer project. By understanding the functionality of each script and class, you can effectively use and extend this project for your image analysis needs.
+
+
+
+
+
+
+# ora
+
+
+1. ColourChecker per identificare l'oggetto
+2. slic for identify colour after check object
+3. algorithm for minimizing the distace from colours after extraction
