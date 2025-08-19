@@ -1,216 +1,218 @@
-# VisualAnalyzer
+# Visual Analyzer
 
-## Introduction
+## Project Description
 
-VisualAnalyzer is a Python project that provides tools for analyzing and processing images. It includes functionalities for color clustering, image comparison, and various image processing techniques.
+Visual Analyzer is a powerful tool designed for color correction and analysis of images and video streams. It allows users to define projects with specific color checker references and sample images to accurately analyze color zones, apply color corrections, and generate comprehensive reports.
+
+## Features
+
+*   **Project Management:** Organize your analysis with dedicated projects, each defined by a `project_config.json` file that specifies reference color checkers and sample images.
+*   **Robust Color Correction:** Automatically corrects colors in input images/frames by comparing them to project-defined reference color checkers. Utilizes a YOLO-based detection with an OpenCV-based fallback for accurate color patch identification.
+*   **Image Alignment:** Corrects perspective distortion using a chessboard pattern and aligns the object with a technical drawing for precise analysis.
+*   **Persistent Caching:** Automatically caches calculated color alignment matrices and HSV color ranges for each project, significantly speeding up subsequent analyses by avoiding recalculation unless source files change.
+*   **Color Zone Analysis:** Analyzes images and video frames to identify and quantify areas matching a user-defined color range in HSV color space. Handles transparent image formats by analyzing only solid pixels.
+*   **Granular Sample Processing:** Allows defining how each sample image contributes to the color range calculation (full image average or specific points with a radius), configurable via a dedicated JSON file and an interactive GUI.
+*   **Comprehensive Reporting:** Generates detailed HTML and PDF reports summarizing the analysis, including statistics, processed images, and visual representations of color spaces, with an improved layout.
+*   **Flexible Input Options:** Supports analysis of single image files, video files, and live camera streams.
+*   **Debug Mode:** Provides verbose output in the console and generates enhanced debug reports (HTML and PDF) with intermediate steps and data, including blurred images and pre-aggregation masks.
+*   **Image Pre-processing (Blur):** Option to apply Gaussian blur to the input image before color matching, which can help in reducing noise and smoothing color transitions.
 
 ## Installation
 
-To install the necessary dependencies, run the following command:
+To set up the Visual Analyzer, follow these steps:
 
-```bash
-pip install -r requirements.txt
+1.  **Navigate to the project directory:**
+
+    ```bash
+    cd C:\Users\Admin\Documents\Coding\VisualAnalyzer
+    ```
+
+2.  **Create a new Python virtual environment:**
+
+    ```bash
+    python -m venv .venv
+    ```
+
+3.  **Activate the virtual environment:**
+
+    ```bash
+    .\.venv\Scripts\activate
+    ```
+
+4.  **Install Python dependencies:**
+
+    ```bash
+    pip install --upgrade pip
+    pip install numpy opencv-python ultralytics jinja2 weasyprint Pillow
+    ```
+
+5.  **Install system-level dependencies for WeasyPrint (Windows):**
+    WeasyPrint requires some external libraries (GTK+ components) to generate PDFs. If you encounter errors related to missing libraries (e.g., `libgobject-2.0-0`), you need to install the GTK+ for Windows Runtime Environment. Follow the instructions on the official WeasyPrint documentation:
+
+    [WeasyPrint Installation Guide](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation)
+
+    Ensure that the installed libraries are accessible to your system's PATH.
+
+## Project Structure
+
+```
+VisualAnalyzer/
+├── data/
+│   ├── projects/
+│   │   └── sample_project/
+│   │       └── project_config.json
+│   │       └── sample_processing_config.json (New: Defines how samples are processed)
+│   │       └── reference_color_checker.png
+│   │       └── samples/ (Contains sample images, dynamically discovered)
+├── src/
+│   ├── alignment/
+│   │   └── aligner.py
+│   ├── color_analysis/
+│   │   ├── analyzer.py
+│   │   └── project_manager.py
+│   ├── color_correction/
+│   │   ├── corrector.py
+│   ├── reporting/
+│   │   ├── generator.py
+│   │   └── templates/
+│   │       ├── Report_Default.html
+│   │       └── Report_Debug.html
+│   ├── sample_manager/ (New: Module for sample processing management)
+│   │   ├── __init__.py
+│   │   ├── processor.py
+│   │   └── gui.py
+│   ├── utils/
+│   │   ├── image_utils.py
+│   │   └── video_utils.py
+│   ├── main.py
+│   └── sample_manager_main.py (New: Main script for sample management)
+├── models/
+│   └── ColourChecker/
+│       └── ColourChecker.pt
+├── output/ (Generated reports and processed images)
+│   └── cache/ (Cached project data)
+├── .venv/ (Python Virtual Environment)
+├── README.md
+└── ... (Other project files)
 ```
 
 ## Usage
 
-The main script `main_cluster.py` demonstrates the usage of the classes in the `VisualAnalyzer` module. It performs the following steps:
+### 1. Project Setup
 
-1. **Image Processing:**
-   - Loads an image using the `ImageProcessor` class.
-   - Applies a blur filter to the image.
-   - Resizes the image.
-2. **Image Analysis:**
-   - Analyzes the image using the `ImageAnalyzer` class.
-   - Compares the image with an ideal image.
-3. **Image Clustering:**
-   - Clusters the image using the `ImageCluster` class.
-   - Removes transparent pixels.
-   - Plots the clustered image.
-   - Extracts cluster information.
-   - Plots the clustered image with high contrast.
-   - Plots the images.
-   - Plots the cluster pie chart.
+Before running the analysis, you need to set up your projects in the `data/projects/` directory. Each project should be a separate folder containing:
 
-## Technical Details
+*   `project_config.json`: A JSON file defining the project's settings:
+    ```json
+    {
+        "reference_color_checker_filename": "reference_color_checker.png",
+        "colorchecker_reference_for_project": [
+            "reference_color_checker.png" 
+        ],
+        "technical_drawing_filename": "drawing.png"
+    }
+    ```
+    *   `reference_color_checker_filename`: The filename of the ideal color checker image within this project's directory, used as the target for color alignment.
+    *   `colorchecker_reference_for_project`: A list of paths (relative to the project folder) to images containing color checkers. These images are used to calculate the color alignment matrix for the project. The matrix is calculated once and cached.
+    *   `technical_drawing_filename` (Optional): The filename of the technical drawing to be used for alignment. This should be a black image with the object's profile in white.
 
-### ImageProcessor Class
+*   `sample_processing_config.json` (Optional): A JSON file that specifies how individual sample images should be processed for color range calculation. If this file doesn't exist for an image, it defaults to `full_average`. Example structure:
+    ```json
+    {
+        "image_configs": [
+            {
+                "filename": "sample1.png",
+                "method": "full_average" 
+            },
+            {
+                "filename": "sample2.png",
+                "method": "points",
+                "points": [
+                    {"x": 100, "y": 150, "radius": 7},
+                    {"x": 200, "y": 250, "radius": 7}
+                ]
+            }
+        ]
+    }
+    ```
 
-The `ImageProcessor` class provides methods for processing images. It includes methods for:
+*   **Sample Images:** All other image files (e.g., `.png`, `.jpg`, `.jpeg`) directly within the project folder or its `samples/` subdirectory (excluding those specified in `project_config.json` as color checkers) will be automatically discovered and used to calculate the project's color range.
 
-- **`__init__(self, image_path)`:** Initializes the `ImageProcessor` object with the path of the image.
-- **`load_image(self)`:** Loads the image from the specified path. If the image file does not exist or cannot be opened, an appropriate message will be printed.
-- **`blur_filter(self, filter_type, **kwargs)`:** Applies a blur filter to the image. Available filters are: 'GaussianBlur', 'BoxBlur', 'MedianFilter'.
-- **`increase_brightness(self, factor=1.2)`:** Increases the brightness of the image by a certain factor.
-- **`increase_saturation(self, factor=1.2)`:** Increases the saturation of the image by a certain factor.
-- **`increase_contrast(self, factor=1.2)`:** Increases the contrast of the image by a certain factor.
-- **`resize(self, size=None, factor=None, maintain_aspect_ratio=False)`:** Resizes the image to the specified size or downsamples it by a certain factor.
-- **`rotate(self, angle)`:** Rotates the image by a certain angle.
-- **`crop(self, box)`:** Crops the image to the specified box.
-- **`to_grayscale(self)`:** Converts the image to grayscale.
-- **`normalize(self)`:** Normalizes the image by scaling the pixel values to the range 0-1.
-- **`equalize(self)`:** Equalizes the image by applying histogram equalization.
-- **`add_noise(self, radius=1.0)`:** Adds noise to the image by randomly redistributing pixel values within a certain neighborhood.
-- **`flip(self, direction)`:** Flips the image horizontally or vertically.
-- **`show_image(self, title="Image", use="Matplotlib")`:** Shows the image using Matplotlib or PIL.
+### 2. Sample Management (New)
 
-### ImageAnalyzer Class
+To configure how sample images are processed (full average vs. point-based), use the `sample_manager_main.py` script:
 
-The `ImageAnalyzer` class provides methods for analyzing and comparing images. It includes methods for:
+Activate your virtual environment:
 
-- **`__init__(self, img_input, ideal_img_input, ideal_img_processed=None)`:** Initializes the `ImageAnalyzer` object with the input image and the ideal image.
-- **`load_image(self, input)`:** Loads an image from a file or a NumPy array.
-- **`calculate_histogram(self, img)`:** Calculates the histogram of an image.
-- **`compare_histograms(self, hist1, hist2)`:** Compares two histograms using correlation, chi-square, intersection, and Bhattacharyya distance.
-- **`compare_images(self)`:** Compares the input image with the ideal image using histogram comparison and mean squared error (MSE).
-- **`draw_histograms(self, img, title)`:** Draws the histograms of an image for each color channel (blue, green, red).
-- **`analyze(self)`:** Analyzes the input image and compares it with the ideal image by drawing histograms and printing comparison results.
-
-### ImageCluster Class
-
-The `ImageCluster` class provides methods for performing color clustering on an image. It includes methods for:
-
-- **`__init__(self, image_input)`:** Initializes the `ImageCluster` object with the image path or PIL Image object.
-- **`remove_transparent(self, alpha_threshold=250)`:** Removes transparent pixels from the image based on the alpha threshold.
-- **`filter_alpha(self)`:** Returns a boolean mask indicating non-transparent pixels.
-- **`cluster(self, n_clusters=None, initial_clusters=None, merge_similar=False, threshold=10)`:** Performs KMeans clustering on the image's colors.
-- **`create_clustered_image(self)`:** Creates a new image where each pixel is colored based on its cluster.
-- **`create_clustered_image_with_ids(self)`:** Creates a new image where each pixel's value represents its cluster ID.
-- **`extract_cluster_info(self)`:** Extracts information about each cluster, including color, pixel count, and percentage.
-- **`calculate_brightness(self, color)`:** Calculates the brightness of a given color.
-- **`plot_original_image(self, ax=None, max_size=(1024, 1024))`:** Plots the original image.
-- **`plot_clustered_image(self, ax=None, max_size=(1024, 1024))`:** Plots the clustered image.
-- **`plot_clustered_image_high_contrast(self, style='jet', show_percentage=True, dpi=100, ax=None)`:** Plots the clustered image with high contrast colors.
-- **`plot_cluster_pie(self, ax=None, dpi=100)`:** Plots a pie chart showing the distribution of pixels in each cluster.
-- **`plot_cluster_bar(self, ax=None, dpi=100)`:** Plots a bar chart showing the distribution of pixels in each cluster.
-- **`plot_cumulative_barchart(self, ax=None, dpi=100)`:** Plots a cumulative bar chart showing the distribution of pixels in each cluster.
-- **`plot_images(self, max_size=(1024, 1024))`:** Plots the original, clustered, and high contrast clustered images side-by-side.
-- **`plot_image_with_grid(self, grid_size=50, color='white', max_size=(1024, 1024), dpi=100)`:** Plots the original image with a grid overlaid.
-- **`save_plots(self)`:** Saves all generated plots to a directory.
-
-### ColorFinder Class
-
-The `ColorFinder` class provides methods for finding and highlighting specific colors in images and video streams. It uses color ranges in the HSV color space to identify regions of interest.
-
-- **`__init__(self, base_color=(30, 255, 255), hue_percentage=3, saturation_percentage=70, value_percentage=70)`:** Initializes the `ColorFinder` object with a base color (in HSV) and percentage ranges for hue, saturation, and value. These ranges define the color limits used for identifying the target color.
-- **`process_webcam(self)`:** Processes video from the webcam in real-time. It identifies regions in each frame that match the specified color limits and highlights them with rectangles. The lower and upper color limits are displayed on the screen for reference. Press 'q' to exit the webcam processing.
-- **`process_image(self, image_path)`:** Processes a single image from the given path. It identifies regions in the image that match the specified color limits and highlights them with rectangles. The lower and upper color limits are displayed on the image for reference. The processed image and a mask showing the identified regions are displayed in separate windows.
-
-**Example Usage:**
-
-```python
-from VisualAnalyzer.ColorFinder import ColorFinder
-
-# Initialize ColorFinder with a yellow base color and specified percentage ranges
-color_finder = ColorFinder(base_color=(30, 255, 255), hue_percentage=3, saturation_percentage=70, value_percentage=70)
-
-# Process video from the webcam
-color_finder.process_webcam()
-
-# Process a single image
-color_finder.process_image("path/to/your/image.jpg")
+```bash
+.\.venv\Scripts\activate
 ```
 
-### colore_recognition
+Run the sample manager:
 
-- **`get_colors(image_path, num_colors=5, show_chart=True)`:** Extracts the dominant colors from an image using KMeans clustering and optionally displays a bar chart of the color distribution.
-- **`rgb_to_hex(rgb)`:** Converts an RGB color tuple to its hexadecimal representation.
-
-### image_contour
-
-- **`image_contour(image_path, edge_detection_method='Canny', filter_type='GaussianBlur', filter_radius=4, use_matplotlib=False, debug=False, **kwargs)`:** Applies an edge detection method (Canny, Sobel, or Laplacian) to an image after optionally applying a blur filter. It can display the results using either Matplotlib or OpenCV.
-
-### Manual Image Alignment
-
-The `ManualImageAligner` class provides a way to manually align two images by selecting corresponding points on both images. This is useful when automatic alignment methods fail or when precise alignment is required.
-
-**`ManualImageAligner` Class:**
-
-- **`__init__(self, image1_path, image2_path)`:** Initializes the `ManualImageAligner` with the paths to the two images to be aligned.
-- **`select_points(self)`:** Opens two windows displaying the images and allows the user to select corresponding points on both images by clicking. At least four pairs of points are required for alignment.
-- **`align_images(self)`:** Calculates the perspective transformation matrix based on the selected points and warps the first image to align with the second. Returns the aligned image, the transformed original image, and the transformation matrix.
-
-**Example:**
-
-```python
-from VisualAnalyzer.ManualImageAligner import ManualImageAligner
-
-image1_path = "path/to/image1.jpg"
-image2_path = "path/to/image2.jpg"
-
-aligner = ManualImageAligner(image1_path, image2_path)
-aligner.select_points()
-aligned_image, transformed_original, matrix = aligner.align_images()
-
-if aligned_image is not None:
-    # Display or save the aligned image
-    cv2.imshow("Aligned Image", aligned_image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+```bash
+python src/sample_manager_main.py --project <project_name>
 ```
 
+Replace `<project_name>` with your project name. This will launch a GUI for each sample image that doesn't have a configuration or is set to `points` method. You can click on the image to select points. After selecting points, click "Save Points" to update `sample_processing_config.json` and close the GUI. This will also invalidate the project's cache, forcing a recalculation of the color range on the next `main.py` run.
 
-## Examples
+### 3. Running the Analysis
 
-The `main_cluster.py` script provides an example of how to use the `ImageProcessor`, `ImageAnalyzer`, and `ImageCluster` classes. 
+Activate your virtual environment (if not already active):
 
-**Example using `colore_recognition`:**
-
-```python
-from VisualAnalyzer.colore_recognition import get_colors
-
-image_path = "path/to/your/image.jpg"
-num_colors = 5
-hex_colors, percentages = get_colors(image_path, num_colors)
-
-print("Hex Colors:", hex_colors)
-print("Percentages:", percentages)
+```bash
+.\.venv\Scripts\activate
 ```
 
-**Example using `image_contour`:**
+Then, run the `main.py` script with the desired arguments:
 
-```python
-from VisualAnalyzer.image_contour import image_contour
+*   **List available projects:**
 
-image_path = "path/to/your/image.jpg"
-edges = image_contour(image_path, edge_detection_method="Canny", debug=True)
-```
+    ```bash
+    python src/main.py
+    ```
 
-## Advanced Example
+    You will be prompted to select a project by number or name.
 
-The following code demonstrates a more comprehensive example using the `ImageProcessor`, `ImageAnalyzer`, and `ImageCluster` classes, as shown in `main_cluster.py`:
+*   **Process a single image:**
 
-```python
-from VisualAnalyzer.ImageAnalyzer import ImageAnalyzer
-from VisualAnalyzer.ImageCluster import ImageCluster
-from VisualAnalyzer.ImageProcessor import ImageProcessor
-import numpy as np
+    ```bash
+    python src/main.py --project <project_name> --image <path_to_image.png>
+    ```
 
-path = r"path/to/your/image.jpg"
+    Replace `<project_name>` with the name of your project (e.g., `sample_project`) and `<path_to_image.png>` with the absolute or relative path to your image file. The color alignment (based on your project's configuration) will be automatically applied to this image before analysis.
 
+*   **Process an image with alignment:**
 
-# Uso della classe ImageProcessor
-processor = ImageProcessor(path)
-# processor.equalize()
-processor.blur_filter("GaussianBlur", radius=5)
-processor.show_image()
-processor.resize(size=400, maintain_aspect_ratio=True)
-processor.show_image()
-blurred_img = processor.img
+    ```bash
+    python src/main.py --project <project_name> --image <path_to_image.png> --alignment
+    ```
 
-# Uso della classe ImageAnalyzer
-analyzer = ImageAnalyzer(
-    np.array(blurred_img),
-    np.array(blurred_img),
-)
-analyzer.analyze()
+    This will enable the image alignment feature. Make sure your project is configured with a `technical_drawing_filename`.
 
-# Uso della classe ImageCluster
-c = ImageCluster(blurred_img)
-c.remove_transparent()
-c.cluster(n_clusters=3)
-c.plot_clustered_image()
-c.extract_cluster_info()
-c.plot_clustered_image_high_contrast()
-c.plot_images()
-c.plot_cluster_pie()
+*   **Process a video file:**
+
+    ```bash
+    python src/main.py --project <project_name> --video <path_to_video.mp4>
+    ```
+
+    Replace `<project_name>` and `<path_to_video.mp4>` accordingly. Color alignment will be applied to each frame.
+
+*   **Process live camera stream:**
+
+    ```bash
+    python src/main.py --project <project_name> --camera
+    ```
+
+    Color alignment will be applied to each frame. Press `q` to quit the camera stream.
+
+### 4. Reports
+
+After processing an image or video, detailed HTML and PDF reports will be generated in the `output/<project_name>/` directory. These reports include analysis statistics, processed images, and visual representations of the color space, with an improved layout.
+
+## Future Improvements
+
+*   **Advanced Color Correction:** Explore more sophisticated color correction algorithms.
+*   **Batch Processing:** Add functionality to process multiple images or videos in a single run.
+*   **Customizable Grid Detection:** Allow users to define the grid size (e.g., 5x5, 7x7) for color checkers other than the standard 6x4.
+*   **Configuration File for Projects:** Implement a more robust way to define project settings (e.g., JSON or YAML files) instead of relying solely on directory structure.
