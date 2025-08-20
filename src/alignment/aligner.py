@@ -2,144 +2,255 @@ import cv2
 import numpy as np
 import os
 
-class Aligner:
+# ==============================================================================
+# HELPER FUNCTION TO PREVENT CORNER ORDER ERRORS
+# ==============================================================================
+
+
+def generate_aruco_marker_map(
+    output_size_wh: tuple, marker_ids: list, marker_size_px: int
+) -> dict:
     """
-    A class to handle image alignment tasks, including perspective correction and object alignment.
+    Generates a marker map with markers in the four corners of the target image.
+    This function ensures the corner points are in the correct order required by OpenCV.
+
+    Args:
+        output_size_wh (tuple): The (width, height) of the target output image.
+        marker_ids (list): A list of 4 integer IDs for the markers. The IDs will be assigned
+                           to Top-Left, Top-Right, Bottom-Right, and Bottom-Left corners in order.
+        marker_size_px (int): The size of the marker in pixels in the target image.
+
+    Returns:
+        dict: A correctly formatted marker_map for use with the ArucoAligner.
+    """
+    if len(marker_ids) != 4:
+        raise ValueError(
+            "This function requires exactly 4 marker IDs for the four corners."
+        )
+
+    w, h = output_size_wh
+    m_size = marker_size_px
+
+    # Define the ideal corner positions with the GUARANTEED CORRECT ORDER:
+    # 0: Top-Left, 1: Top-Right, 2: Bottom-Right, 3: Bottom-Left
+
+    # Top-Left Marker (ID: marker_ids[0])
+    tl_corners = [[0, 0], [m_size, 0], [m_size, m_size], [0, m_size]]
+
+    # Top-Right Marker (ID: marker_ids[1])
+    tr_corners = [[w - m_size, 0], [w, 0], [w, m_size], [w - m_size, m_size]]
+
+    # Bottom-Right Marker (ID: marker_ids[2])
+    br_corners = [[w - m_size, h - m_size], [w, h - m_size], [w, h], [w - m_size, h]]
+
+    # Bottom-Left Marker (ID: marker_ids[3])
+    bl_corners = [[0, h - m_size], [m_size, h - m_size], [m_size, h], [0, h]]
+
+    marker_map = {
+        marker_ids[0]: tl_corners,
+        marker_ids[1]: tr_corners,
+        marker_ids[2]: br_corners,
+        marker_ids[3]: bl_corners,
+    }
+
+    return marker_map
+
+
+# ==============================================================================
+# THE ROBUST ARUCO ALIGNER CLASS (Unchanged Logic, Added Comments)
+# ==============================================================================
+class ArucoAligner:
+    """
+    A class to handle image alignment by correcting perspective using ArUco markers.
     """
 
-    def __init__(self, debug_mode: bool = False):
-        """
-        Initializes the Aligner.
-
-        Args:
-            debug_mode (bool): If True, enables debug output.
-        """
+    def __init__(
+        self,
+        aruco_dict=cv2.aruco.DICT_5X5_250,
+        debug_mode: bool = False,
+        output_dir: str = "output_aruco",
+    ):
+        self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(aruco_dict)
+        self.aruco_parameters = cv2.aruco.DetectorParameters()
+        self.detector = cv2.aruco.ArucoDetector(
+            self.aruco_dictionary, self.aruco_parameters
+        )
         self.debug_mode = debug_mode
+        self.output_dir = output_dir
+        if self.debug_mode and self.output_dir:
+            os.makedirs(self.output_dir, exist_ok=True)
 
-    def generate_chessboard_image(self, pattern_size=(9, 6), square_size_px=50, output_path="chessboard.png"):
-        """
-        Generates and saves a chessboard image.
-
-        Args:
-            pattern_size (tuple): The number of inner corners in the grid pattern (width, height).
-            square_size_px (int): The size of each square in pixels.
-            output_path (str): The path to save the generated chessboard image.
-        """
-        board_width = pattern_size[0] + 1
-        board_height = pattern_size[1] + 1
-        img_width = board_width * square_size_px
-        img_height = board_height * square_size_px
-
-        chessboard = np.zeros((img_height, img_width), dtype=np.uint8)
-        for y in range(board_height):
-            for x in range(board_width):
-                if (x + y) % 2 == 0:
-                    chessboard[y*square_size_px:(y+1)*square_size_px, x*square_size_px:(x+1)*square_size_px] = 255
-        
-        cv2.imwrite(output_path, chessboard)
-        if self.debug_mode:
-            print(f"[DEBUG] Generated chessboard image saved to: {output_path}")
-
-    def align_image(self, image_path: str, drawing_path: str, pattern_size=(9, 6)):
-        """
-        Aligns an image with a technical drawing using a chessboard for perspective correction.
-
-        Args:
-            image_path (str): The path to the input image containing the object and chessboard.
-            drawing_path (str): The path to the technical drawing (black background, white profile).
-            pattern_size (tuple): The number of inner corners of the chessboard (width, height).
-
-        Returns:
-            np.ndarray: The aligned and masked image, or None if alignment fails.
-        """
-        if self.debug_mode:
-            print(f"[DEBUG] Starting alignment for image: {image_path}")
-
-        image = cv2.imread(image_path)
+    def align_image_by_markers(
+        self, image: np.ndarray, marker_map: dict, output_size_wh: tuple
+    ):
         if image is None:
-            raise ValueError(f"Could not load image from path: {image_path}")
+            raise ValueError("Input image is None.")
 
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        drawing = cv2.imread(drawing_path, cv2.IMREAD_GRAYSCALE)
-        if drawing is None:
-            raise ValueError(f"Could not load drawing from path: {drawing_path}")
+        corners, ids, _ = self.detector.detectMarkers(gray_image)
 
-        # 1. Find chessboard corners
-        ret, corners = cv2.findChessboardCorners(gray_image, pattern_size, None)
-
-        if not ret:
+        if ids is None or len(ids) < 1:
             if self.debug_mode:
-                print("[DEBUG] Chessboard corners not found in the image.")
-            return None
+                print("[DEBUG] No ArUco markers found.")
+            return None, None, None, None, None
 
-        # 2. Generate ideal chessboard points
-        objp = np.zeros((pattern_size[0] * pattern_size[1], 3), np.float32)
-        objp[:, :2] = np.mgrid[0:pattern_size[0], 0:pattern_size[1]].T.reshape(-1, 2)
+        # Refine corner locations to sub-pixel accuracy for better results.
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        # Note: corners is a tuple of arrays. We need to iterate and refine.
+        for i in range(len(corners)):
+            cv2.cornerSubPix(gray_image, corners[i], (5, 5), (-1, -1), criteria)
 
-        # 3. Calculate homography
-        homography, _ = cv2.findHomography(objp[:, :2], corners)
-
-        # 4. Warp the image
-        rectified_img = cv2.warpPerspective(image, np.linalg.inv(homography), (drawing.shape[1], drawing.shape[0]))
         if self.debug_mode:
-            cv2.imwrite("rectified_debug.png", rectified_img)
+            img_with_markers = image.copy()
+            cv2.aruco.drawDetectedMarkers(img_with_markers, corners, ids)
+            cv2.imwrite(
+                os.path.join(self.output_dir, "aruco_markers_detected.png"),
+                img_with_markers,
+            )
+            print(f"[DEBUG] Detected marker IDs: {ids.flatten()}")
 
-        # 5. Align object with drawing
-        # Find contour of the drawing
-        contours_drawing, _ = cv2.findContours(drawing, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours_drawing:
+        source_points, dest_points, used_marker_map = [], [], {}
+        for i, marker_id in enumerate(ids.flatten()):
+            if marker_id in marker_map:
+                # The order of corners from detectMarkers is TL, TR, BR, BL.
+                # We add all 4 detected corners to our source list.
+                for corner_point in corners[i][0]:
+                    source_points.append(corner_point)
+
+                # We add all 4 ideal corners from our map to the destination list.
+                # This is where the order MUST match.
+                for dest_point in marker_map[marker_id]:
+                    dest_points.append(dest_point)
+
+                used_marker_map[marker_id] = marker_map[marker_id]
+
+        if len(source_points) < 4:
             if self.debug_mode:
-                print("[DEBUG] No contours found in the drawing.")
-            return None
-        drawing_contour = max(contours_drawing, key=cv2.contourArea)
+                print("[DEBUG] Not enough valid markers found to compute homography.")
+            return None, None, None, None, None
 
-        # Find contour of the object in the rectified image
-        gray_rectified = cv2.cvtColor(rectified_img, cv2.COLOR_BGR2GRAY)
-        _, thresh_rectified = cv2.threshold(gray_rectified, 50, 255, cv2.THRESH_BINARY)
-        contours_object, _ = cv2.findContours(thresh_rectified, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours_object:
+        # Use RANSAC to calculate a robust homography, ignoring potential outlier points.
+        h, mask = cv2.findHomography(
+            np.array(source_points), np.array(dest_points), cv2.RANSAC, 5.0
+        )
+
+        if h is None:
             if self.debug_mode:
-                print("[DEBUG] No contours found in the rectified image.")
-            return None
-        object_contour = max(contours_object, key=cv2.contourArea)
+                print("[DEBUG] Homography calculation failed.")
+            return None, None, None, None, None
 
-        # Align by moments and rotation
-        M_drawing = cv2.moments(drawing_contour)
-        M_object = cv2.moments(object_contour)
-
-        if M_drawing['m00'] == 0 or M_object['m00'] == 0:
-            if self.debug_mode:
-                print("[DEBUG] Cannot calculate moments for alignment.")
-            return None
-
-        cx_drawing = int(M_drawing['m10'] / M_drawing['m00'])
-        cy_drawing = int(M_drawing['m01'] / M_drawing['m00'])
-        cx_object = int(M_object['m10'] / M_object['m00'])
-        cy_object = int(M_object['m01'] / M_object['m00'])
-
-        # Get rotation angle
-        _, _, angle_drawing = cv2.fitEllipse(drawing_contour)
-        _, _, angle_object = cv2.fitEllipse(object_contour)
-        angle_diff = angle_drawing - angle_object
-
-        # Rotation and Translation
-        rot_mat = cv2.getRotationMatrix2D((cx_object, cy_object), angle_diff, 1)
-        
-        # Adjust translation part of the rotation matrix
-        rot_mat[0, 2] += cx_drawing - cx_object
-        rot_mat[1, 2] += cy_drawing - cy_object
-
-        aligned_rectified = cv2.warpAffine(rectified_img, rot_mat, (rectified_img.shape[1], rectified_img.shape[0]))
-        if self.debug_mode:
-            cv2.imwrite("aligned_rectified_debug.png", aligned_rectified)
-
-        # 6. Mask the image
-        mask = cv2.bitwise_not(drawing)
-        final_image = cv2.bitwise_and(aligned_rectified, aligned_rectified, mask=drawing)
-        if self.debug_mode:
-            cv2.imwrite("final_image_debug.png", final_image)
+        aligned_image = cv2.warpPerspective(image, h, output_size_wh)
 
         if self.debug_mode:
             print("[DEBUG] Alignment successful.")
+            cv2.imwrite(
+                os.path.join(self.output_dir, "aruco_aligned_image.png"), aligned_image
+            )
 
-        return final_image
+        return aligned_image, h, corners, ids, used_marker_map
+
+
+# ==============================================================================
+# THE MAIN ALIGNER CLASS (Unchanged)
+# ==============================================================================
+class Aligner:
+    def __init__(self, debug_mode: bool = False, output_dir: str = "output"):
+        self.debug_mode = debug_mode
+        self.output_dir = output_dir
+        aruco_output_dir = (
+            os.path.join(self.output_dir, "aruco_debug") if self.output_dir else None
+        )
+        self.aruco_aligner = ArucoAligner(
+            debug_mode=debug_mode, output_dir=aruco_output_dir
+        )
+
+    def align_image(self, image: np.ndarray, marker_map: dict, output_size_wh: tuple):
+        if self.debug_mode:
+            print("[DEBUG] Starting alignment using ArUcoAligner.")
+
+        aligned_image, homography, corners, ids, used_map = (
+            self.aruco_aligner.align_image_by_markers(image, marker_map, output_size_wh)
+        )
+
+        alignment_data = None
+        if aligned_image is not None:
+            alignment_data = {
+                "homography_matrix": homography.tolist(),
+                "detected_corners": [c.tolist() for c in corners],
+                "detected_ids": ids.flatten().tolist(),
+                "used_marker_map": used_map,
+            }
+        return aligned_image, alignment_data
+
+
+# ==============================================================================
+# EXAMPLE USAGE
+# ==============================================================================
+if __name__ == "__main__":
+    # --- 1. Define Parameters ---
+    OUTPUT_WIDTH, OUTPUT_HEIGHT = 800, 600
+    MARKER_IDS = [10, 20, 30, 40]  # TL, TR, BR, BL
+    MARKER_SIZE = 100  # Size in pixels for the ideal output image
+
+    # --- 2. Generate the Marker Map Safely ---
+    # Use the helper function to avoid corner order errors.
+    print("Generating a safe marker map...")
+    safe_marker_map = generate_aruco_marker_map(
+        output_size_wh=(OUTPUT_WIDTH, OUTPUT_HEIGHT),
+        marker_ids=MARKER_IDS,
+        marker_size_px=MARKER_SIZE,
+    )
+    print("Marker map generated successfully.")
+
+    # --- 3. Create a Synthetic Distorted Image for Testing ---
+    print("Creating a synthetic test image...")
+    # a) Create the ideal layout first
+    ideal_canvas = np.ones((OUTPUT_HEIGHT, OUTPUT_WIDTH, 3), dtype=np.uint8) * 240
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_250)
+    for marker_id, corners in safe_marker_map.items():
+        marker_img = cv2.aruco.generateImageMarker(aruco_dict, marker_id, MARKER_SIZE)
+        marker_img_bgr = cv2.cvtColor(marker_img, cv2.COLOR_GRAY2BGR)
+        tl_corner = corners[0]  # Top-left corner of the marker
+        ideal_canvas[
+            tl_corner[1] : tl_corner[1] + MARKER_SIZE,
+            tl_corner[0] : tl_corner[0] + MARKER_SIZE,
+        ] = marker_img_bgr
+
+    # b) Apply a perspective warp to simulate a camera view
+    src_pts = np.float32(
+        [[0, 0], [OUTPUT_WIDTH, 0], [OUTPUT_WIDTH, OUTPUT_HEIGHT], [0, OUTPUT_HEIGHT]]
+    )
+    dst_pts = np.float32(
+        [
+            [50, 80],
+            [OUTPUT_WIDTH - 20, 50],
+            [OUTPUT_WIDTH - 80, OUTPUT_HEIGHT - 30],
+            [20, OUTPUT_HEIGHT - 100],
+        ]
+    )
+    perspective_matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
+    distorted_image = cv2.warpPerspective(
+        ideal_canvas, perspective_matrix, (OUTPUT_WIDTH, OUTPUT_HEIGHT)
+    )
+    cv2.imwrite("test_distorted_input.png", distorted_image)
+    print("Test image 'test_distorted_input.png' saved.")
+
+    # --- 4. Initialize and Run the Aligner ---
+    print("\nInitializing Aligner in debug mode...")
+    aligner = Aligner(debug_mode=True, output_dir="output_folder")
+
+    print("Attempting to align the image...")
+    aligned_image, alignment_data = aligner.align_image(
+        image=distorted_image,
+        marker_map=safe_marker_map,
+        output_size_wh=(OUTPUT_WIDTH, OUTPUT_HEIGHT),
+    )
+
+    # --- 5. Check and Save Results ---
+    if aligned_image is not None:
+        print("\n✅✅✅ ALIGNMENT SUCCEEDED! ✅✅✅")
+        cv2.imwrite("test_aligned_output.png", aligned_image)
+        print("Final aligned image saved as 'test_aligned_output.png'")
+        # print("Alignment data:", alignment_data)
+    else:
+        print("\n❌❌❌ ALIGNMENT FAILED. ❌❌❌")

@@ -163,8 +163,14 @@ class ReportGenerator:
         # Copy logo to output directory and get relative path
         logo_filename = os.path.basename(config.LOGO_PATH)
         logo_dest_path = self.project_output_dir / logo_filename
-        shutil.copy(config.LOGO_PATH, logo_dest_path)
-        logo_path_relative = logo_filename
+        logo_path_relative = "" # Default to empty string if logo not found
+        try:
+            shutil.copy(config.LOGO_PATH, logo_dest_path)
+            logo_path_relative = logo_filename
+        except FileNotFoundError:
+            print(f"[WARNING] Logo file not found at {config.LOGO_PATH}. Report will be generated without a logo.")
+        except Exception as e:
+            print(f"[WARNING] An unexpected error occurred while copying logo: {e}. Report will be generated without a logo.")
 
         # Get relative paths for other images saved by ColorAnalyzer
         processed_image_path_relative = os.path.basename(analysis_results['processed_image_path'])

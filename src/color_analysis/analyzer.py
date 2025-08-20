@@ -99,6 +99,57 @@ class ColorAnalyzer:
 
         return aggregated_mask
 
+    def _aggregate_mask_improved(self, mask: np.ndarray, kernel_size: int = 7, min_area_ratio: float = 0.0005, debug_mode: bool = False) -> np.ndarray:
+        """
+        Aggregates nearby matched pixel areas in a binary mask, focusing on preserving connected regions
+        and filling small gaps.
+
+        Args:
+            mask (np.ndarray): The binary mask (255 for matched, 0 for unmatched).
+            kernel_size (int): Size of the kernel for morphological operations.
+            min_area_ratio (float): Minimum area of a connected component to keep, as a ratio of total image area.
+            debug_mode (bool): If True, prints debug information.
+
+        Returns:
+            np.ndarray: The improved aggregated mask.
+        """
+        if debug_mode: print(f"[DEBUG] Improved aggregating mask with kernel_size={kernel_size}, min_area_ratio={min_area_ratio}")
+
+        # 1. Initial Dilation: Expand matched regions to connect nearby components and fill small gaps.
+        dilate_kernel = np.ones((kernel_size, kernel_size), np.uint8)
+        dilated_mask = cv2.dilate(mask, dilate_kernel, iterations=1)
+
+        # 2. Connected Components Analysis on the dilated mask
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(dilated_mask, 8, cv2.CV_32S)
+
+        aggregated_mask = np.zeros_like(mask)
+        total_image_area = mask.shape[0] * mask.shape[1]
+
+        for i in range(1, num_labels): # Skip background label (0)
+            area = stats[i, cv2.CC_STAT_AREA]
+            # Keep components that are above a certain area threshold
+            if area >= total_image_area * min_area_ratio:
+                # Fill holes within the kept component
+                component_mask = np.zeros_like(mask, dtype=np.uint8)
+                component_mask[labels == i] = 255
+                
+                # Find contours of the component
+                contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    # Draw contours filled to fill any holes
+                    cv2.drawContours(aggregated_mask, contours, -1, 255, cv2.FILLED)
+                
+                if debug_mode: print(f"[DEBUG]   Kept and filled component {i} with area {area}.")
+            else:
+                if debug_mode: print(f"[DEBUG]   Filtered out component {i} with area {area} (too small).")
+        
+        # Ensure all original matched pixels are preserved
+        final_aggregated_mask = cv2.bitwise_or(aggregated_mask, mask)
+        
+        if debug_mode: print(f"[DEBUG] Improved aggregation complete. Original matched pixels: {cv2.countNonZero(mask)}, Aggregated matched pixels: {cv2.countNonZero(final_aggregated_mask)}")
+
+        return final_aggregated_mask
+
     def calculate_statistics(self, mask: np.ndarray, total_pixels: int, debug_mode: bool = False) -> Tuple[float, int]:
         """
         Calculates the percentage and number of matched pixels.
@@ -144,13 +195,23 @@ class ColorAnalyzer:
         if image is None and image_path is None:
             raise ValueError("Either 'image' or 'image_path' must be provided.")
 
+        alignment_data = None
         if alignment_mode:
             if not drawing_path:
                 raise ValueError("Drawing path must be provided for alignment.")
             if not image_path:
                 raise ValueError("Image path must be provided for alignment.")
-            aligner = Aligner(debug_mode=debug_mode)
-            image = aligner.align_image(image_path=image_path, drawing_path=drawing_path)
+            aligner = Aligner(debug_mode=debug_mode, output_dir=output_dir)
+            alignment_result = aligner.align_image(image_path=image_path, drawing_path=drawing_path)
+            if alignment_result is None:
+                print("[WARNING] Image alignment failed. Proceeding without alignment.")
+                aligned_image = None # Indicate that alignment did not produce an image
+                alignment_data = None
+                # Use the original image for further processing if alignment failed
+                # The original image is loaded later in the function, so no need to set 'image' here yet.
+            else:
+                aligned_image, alignment_data = alignment_result
+                image = aligned_image # Use the aligned image for further processing
 
         if image is not None:
             original_image = image
@@ -189,7 +250,7 @@ class ColorAnalyzer:
             save_image(mask_pre_aggregation_path, mask) # Save mask before aggregation
             if debug_mode: print(f"[DEBUG] Mask before aggregation saved to {mask_pre_aggregation_path}")
 
-            mask = self._aggregate_mask(mask, debug_mode=debug_mode)
+            mask = self._aggregate_mask_improved(mask, debug_mode=debug_mode)
             negative_mask = cv2.bitwise_not(mask) # Recalculate negative mask after aggregation
 
         percentage, matched_pixels = self.calculate_statistics(mask, total_pixels, debug_mode=debug_mode)
@@ -225,5 +286,6 @@ class ColorAnalyzer:
             "matched_pixels": matched_pixels,
             "total_pixels": total_pixels,
             "mask_pre_aggregation_path": mask_pre_aggregation_path, # New: Path to mask before aggregation
-            "blurred_image_path": blurred_image_path # New: Path to blurred image
+            "blurred_image_path": blurred_image_path, # New: Path to blurred image
+            "alignment_data": alignment_data # New: Geometrical alignment data
         }

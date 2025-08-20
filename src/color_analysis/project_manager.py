@@ -97,6 +97,10 @@ class ProjectManager:
         ref_color_checker_filename = config_data.get("reference_color_checker_filename")
         colorchecker_ref_for_project_relative = config_data.get("colorchecker_reference_for_project", [])
         technical_drawing_filename = config_data.get("technical_drawing_filename")
+        
+        # New: ArUco alignment configuration
+        aruco_marker_map = config_data.get("aruco_marker_map")
+        aruco_output_size = config_data.get("aruco_output_size")
 
         if not ref_color_checker_filename:
             raise ValueError(f"'reference_color_checker_filename' not specified in project_config.json for project '{project_name}'.")
@@ -160,7 +164,9 @@ class ProjectManager:
             "reference_color_checker": ref_color_checker_path,
             "colorchecker_reference_for_project": colorchecker_ref_for_project_paths,
             "sample_image_configs": sample_image_configs,
-            "technical_drawing": technical_drawing_path
+            "technical_drawing": technical_drawing_path,
+            "aruco_marker_map": aruco_marker_map, # New
+            "aruco_output_size": aruco_output_size # New
         }
 
     def get_hsv_colors_from_samples(self, sample_image_configs: List[Dict], debug_mode: bool = False) -> np.ndarray:

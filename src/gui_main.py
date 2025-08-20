@@ -1,3 +1,4 @@
+print("---" + " Starting gui_main.py ---")
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
@@ -7,8 +8,10 @@ import threading
 # We will refactor main.py to expose this function
 from src.main import run_analysis_from_gui # This will be created in main.py
 
+print("---" + " Before VisualAnalyzerGUI class definition ---")
 class VisualAnalyzerGUI:
     def __init__(self, master):
+        print("---" + " Inside VisualAnalyzerGUI __init__ ---")
         self.master = master
         master.title("Visual Analyzer")
 
@@ -81,7 +84,12 @@ class VisualAnalyzerGUI:
             self.log_message(f"Error loading projects: {e}")
 
     def browse_file(self):
-        file_path = filedialog.askopenfilename()
+        filetypes = [
+            ("Image files", "*.png *.jpg *.jpeg *.gif *.bmp"),
+            ("Video files", "*.mp4 *.avi *.mov *.mkv"),
+            ("All files", "*.*")
+        ]
+        file_path = filedialog.askopenfilename(filetypes=filetypes)
         if file_path:
             self.input_path_var.set(file_path)
 
@@ -157,13 +165,21 @@ class VisualAnalyzerGUI:
         def write(self, text):
             self.widget.config(state="normal")
             self.widget.insert(tk.END, text)
-            self.widget.see(tk.END)
+            self.widget.see(tk.END) # Scroll to end
             self.widget.config(state="disabled")
 
         def flush(self):
             pass # Required for file-like objects
 
+print("---" + " Before start_gui() ---")
 def start_gui():
-    root = tk.Tk()
-    app = VisualAnalyzerGUI(root)
-    root.mainloop()
+    print("---" + " Inside start_gui() ---")
+    try:
+        root = tk.Tk()
+        app = VisualAnalyzerGUI(root)
+        root.mainloop()
+    except Exception as e:
+        print(f"Error starting GUI: {e}")
+
+if __name__ == "__main__":
+    start_gui()

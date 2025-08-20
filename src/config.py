@@ -18,7 +18,7 @@ OUTPUT_DIR = ROOT_DIR / "output"
 
 # --- Report Configuration ---
 REPORT_ASSETS_DIR = OUTPUT_DIR / "assets"
-LOGO_PATH = REPORT_ASSETS_DIR / "logo.png"
+LOGO_PATH = TEMPLATES_DIR / "logo.png"
 
 # --- YOLO Model ---
 YOLO_MODEL_PATH = ROOT_DIR / "models" / "ColourChecker" / "ColourChecker.pt"
