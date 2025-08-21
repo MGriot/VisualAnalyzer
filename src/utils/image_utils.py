@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from typing import Tuple
 
 def load_image(image_path: str, handle_transparency: bool = True):
     """
@@ -34,3 +35,31 @@ def save_image(image_path: str, image: np.ndarray):
         image (np.ndarray): The image to save.
     """
     cv2.imwrite(image_path, image)
+
+def blur_image(image: np.ndarray, kernel_size: Tuple[int, int] = None) -> Tuple[np.ndarray, Tuple[int, int]]:
+    """
+    Applies Gaussian blur to the image.
+    If kernel_size is not provided, it is calculated adaptively based on image dimensions.
+
+    Args:
+        image (np.ndarray): The input image.
+        kernel_size (Tuple[int, int], optional): Size of the Gaussian kernel.
+                                                  If None, it's calculated automatically.
+                                                  Defaults to None.
+
+    Returns:
+        Tuple[np.ndarray, Tuple[int, int]]: A tuple containing the blurred image and the kernel size used.
+    """
+    if kernel_size is None:
+        # Adaptively calculate kernel size based on the smaller dimension of the image.
+        # This heuristic aims for a kernel size that is roughly 0.5% of the smaller dimension.
+        min_dim = min(image.shape[0], image.shape[1])
+        kernel_dim = max(3, int(min_dim * 0.005))
+
+        # Ensure the kernel dimension is an odd number
+        if kernel_dim % 2 == 0:
+            kernel_dim += 1
+        
+        kernel_size = (kernel_dim, kernel_dim)
+
+    return cv2.GaussianBlur(image, kernel_size, 0), kernel_size

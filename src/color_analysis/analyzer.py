@@ -4,7 +4,7 @@ import numpy as np
 from typing import Tuple
 import datetime
 
-from src.utils.image_utils import load_image, save_image
+from src.utils.image_utils import load_image, save_image, blur_image
 from src.alignment.aligner import Aligner
 
 class ColorAnalyzer:
@@ -19,40 +19,14 @@ class ColorAnalyzer:
         """
         pass
 
-    def _blur_image(self, image: np.ndarray, kernel_size: Tuple[int, int] = (5, 5), debug_mode: bool = False) -> np.ndarray:
-        """
-        Applies Gaussian blur to the image.
-
-        Args:
-            image (np.ndarray): The input image.
-            kernel_size (Tuple[int, int]): Size of the Gaussian kernel. (width, height).
-            debug_mode (bool): If True, prints debug information.
-
-        Returns:
-            np.ndarray: The blurred image.
-        """
-        if debug_mode: print(f"[DEBUG] Applying Gaussian blur with kernel size: {kernel_size}")
-        return cv2.GaussianBlur(image, kernel_size, 0)
-
     def find_color_zones(self, image: np.ndarray, lower_hsv: np.ndarray, upper_hsv: np.ndarray, alpha_channel: np.ndarray = None, debug_mode: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """
         Finds color zones within an image that fall within the specified HSV range.
-
-        Args:
-            image (np.ndarray): The input image (BGR format).
-            lower_hsv (np.ndarray): The lower bound of the HSV color range.
-            upper_hsv (np.ndarray): The upper bound of the HSV color range.
-            alpha_channel (np.ndarray, optional): The alpha channel of the image for transparency handling.
-            debug_mode (bool): If True, prints debug information.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: A tuple containing the mask image and the negative mask image.
         """
         hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv_image, lower_hsv, upper_hsv)
 
         if alpha_channel is not None:
-            # Apply the alpha channel to the mask, so transparent areas are not considered
             mask = cv2.bitwise_and(mask, mask, mask=alpha_channel)
 
         negative_mask = cv2.bitwise_not(mask)
@@ -61,89 +35,32 @@ class ColorAnalyzer:
 
         return mask, negative_mask
 
-    def _aggregate_mask(self, mask: np.ndarray, kernel_size: int = 5, min_area_ratio: float = 0.001, debug_mode: bool = False) -> np.ndarray:
-        """
-        Aggregates nearby matched pixel areas in a binary mask.
-
-        Args:
-            mask (np.ndarray): The binary mask (255 for matched, 0 for unmatched).
-            kernel_size (int): Size of the kernel for morphological operations. Controls aggregation extent.
-            min_area_ratio (float): Minimum area of a connected component to keep, as a ratio of total image area.
-            debug_mode (bool): If True, prints debug information.
-
-        Returns:
-            np.ndarray: The aggregated mask.
-        """
-        if debug_mode: print(f"[DEBUG] Aggregating mask with kernel_size={kernel_size}, min_area_ratio={min_area_ratio}")
-
-        # Morphological Closing: Dilation followed by Erosion
-        # This connects nearby white regions and fills small black holes.
-        kernel = np.ones((kernel_size, kernel_size), np.uint8)
-        closed_mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-        # Connected Components Analysis
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(closed_mask, 8, cv2.CV_32S)
-
-        aggregated_mask = np.zeros_like(mask)
-        total_image_area = mask.shape[0] * mask.shape[1]
-
-        for i in range(1, num_labels): # Skip background label (0)
-            area = stats[i, cv2.CC_STAT_AREA]
-            if area >= total_image_area * min_area_ratio:
-                aggregated_mask[labels == i] = 255
-                if debug_mode: print(f"[DEBUG]   Kept component {i} with area {area}.")
-            else:
-                if debug_mode: print(f"[DEBUG]   Filtered out component {i} with area {area} (too small).")
-        
-        if debug_mode: print(f"[DEBUG] Aggregation complete. Original matched pixels: {cv2.countNonZero(mask)}, Aggregated matched pixels: {cv2.countNonZero(aggregated_mask)}")
-
-        return aggregated_mask
-
     def _aggregate_mask_improved(self, mask: np.ndarray, kernel_size: int = 7, min_area_ratio: float = 0.0005, debug_mode: bool = False) -> np.ndarray:
         """
-        Aggregates nearby matched pixel areas in a binary mask, focusing on preserving connected regions
-        and filling small gaps.
-
-        Args:
-            mask (np.ndarray): The binary mask (255 for matched, 0 for unmatched).
-            kernel_size (int): Size of the kernel for morphological operations.
-            min_area_ratio (float): Minimum area of a connected component to keep, as a ratio of total image area.
-            debug_mode (bool): If True, prints debug information.
-
-        Returns:
-            np.ndarray: The improved aggregated mask.
+        Aggregates nearby matched pixel areas in a binary mask.
         """
         if debug_mode: print(f"[DEBUG] Improved aggregating mask with kernel_size={kernel_size}, min_area_ratio={min_area_ratio}")
 
-        # 1. Initial Dilation: Expand matched regions to connect nearby components and fill small gaps.
         dilate_kernel = np.ones((kernel_size, kernel_size), np.uint8)
         dilated_mask = cv2.dilate(mask, dilate_kernel, iterations=1)
 
-        # 2. Connected Components Analysis on the dilated mask
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(dilated_mask, 8, cv2.CV_32S)
 
         aggregated_mask = np.zeros_like(mask)
         total_image_area = mask.shape[0] * mask.shape[1]
 
-        for i in range(1, num_labels): # Skip background label (0)
+        for i in range(1, num_labels):
             area = stats[i, cv2.CC_STAT_AREA]
-            # Keep components that are above a certain area threshold
             if area >= total_image_area * min_area_ratio:
-                # Fill holes within the kept component
                 component_mask = np.zeros_like(mask, dtype=np.uint8)
                 component_mask[labels == i] = 255
-                
-                # Find contours of the component
                 contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 if contours:
-                    # Draw contours filled to fill any holes
                     cv2.drawContours(aggregated_mask, contours, -1, 255, cv2.FILLED)
-                
                 if debug_mode: print(f"[DEBUG]   Kept and filled component {i} with area {area}.")
             else:
                 if debug_mode: print(f"[DEBUG]   Filtered out component {i} with area {area} (too small).")
         
-        # Ensure all original matched pixels are preserved
         final_aggregated_mask = cv2.bitwise_or(aggregated_mask, mask)
         
         if debug_mode: print(f"[DEBUG] Improved aggregation complete. Original matched pixels: {cv2.countNonZero(mask)}, Aggregated matched pixels: {cv2.countNonZero(final_aggregated_mask)}")
@@ -153,15 +70,6 @@ class ColorAnalyzer:
     def calculate_statistics(self, mask: np.ndarray, total_pixels: int, debug_mode: bool = False) -> Tuple[float, int]:
         """
         Calculates the percentage and number of matched pixels.
-
-        Args:
-            mask (np.ndarray): The mask image (binary, 255 for matched, 0 for unmatched).
-            total_pixels (int): The total number of pixels in the original image.
-            debug_mode (bool): If True, prints debug information.
-
-        Returns:
-            Tuple[float, int]: A tuple containing the percentage of matched pixels and the
-                               number of matched pixels.
         """
         matched_pixels = cv2.countNonZero(mask)
         percentage = (matched_pixels / total_pixels) * 100 if total_pixels > 0 else 0
@@ -176,27 +84,13 @@ class ColorAnalyzer:
     def process_image(self, image: np.ndarray = None, image_path: str = None, lower_hsv: np.ndarray = None, upper_hsv: np.ndarray = None, output_dir: str = None, debug_mode: bool = False, aggregate_mode: bool = False, blur_mode: bool = False, alignment_mode: bool = False, drawing_path: str = None) -> dict:
         """
         Processes a single image for color analysis.
-
-        Args:
-            image (np.ndarray, optional): The input image as a NumPy array. If provided, image_path is ignored.
-            image_path (str, optional): Path to the input image. Used if 'image' is None.
-            lower_hsv (np.ndarray): Lower HSV limit for color matching.
-            upper_hsv (np.ndarray): Upper HSV limit for color matching.
-            output_dir (str): Directory to save output images.
-            debug_mode (bool): If True, prints debug information.
-            aggregate_mode (bool): If True, aggregates nearby matched pixel areas.
-            blur_mode (bool): If True, blurs the image before color matching.
-            alignment_mode (bool): If True, performs image alignment.
-            drawing_path (str): Path to the technical drawing for alignment.
-
-        Returns:
-            dict: A dictionary containing analysis results.
         """
         if image is None and image_path is None:
             raise ValueError("Either 'image' or 'image_path' must be provided.")
 
         alignment_data = None
         if alignment_mode:
+            # This block is currently not hit from main.py but kept for potential future use
             if not drawing_path:
                 raise ValueError("Drawing path must be provided for alignment.")
             if not image_path:
@@ -205,20 +99,18 @@ class ColorAnalyzer:
             alignment_result = aligner.align_image(image_path=image_path, drawing_path=drawing_path)
             if alignment_result is None:
                 print("[WARNING] Image alignment failed. Proceeding without alignment.")
-                aligned_image = None # Indicate that alignment did not produce an image
+                image = None
                 alignment_data = None
-                # Use the original image for further processing if alignment failed
-                # The original image is loaded later in the function, so no need to set 'image' here yet.
             else:
                 aligned_image, alignment_data = alignment_result
-                image = aligned_image # Use the aligned image for further processing
+                image = aligned_image
 
         if image is not None:
             original_image = image
-            alpha_channel = None # Assume no alpha if direct image is passed, or handle separately if needed
-            if original_image.shape[2] == 4: # Check for RGBA
+            alpha_channel = None
+            if original_image.shape[2] == 4:
                 alpha_channel = original_image[:, :, 3]
-                original_image = original_image[:, :, :3] # Convert to BGR
+                original_image = original_image[:, :, :3]
         else:
             original_image, alpha_channel = load_image(image_path, handle_transparency=True)
             if original_image is None:
@@ -226,66 +118,71 @@ class ColorAnalyzer:
 
         if lower_hsv is None or upper_hsv is None:
             raise ValueError("lower_hsv and upper_hsv must be provided.")
-
         if output_dir is None:
             raise ValueError("output_dir must be provided.")
 
         image_for_analysis = original_image.copy()
         blurred_image_path = None
+        blurred_kernel_size = None
         if blur_mode:
-            image_for_analysis = self._blur_image(image_for_analysis, debug_mode=debug_mode)
-            blurred_image_path = os.path.join(output_dir, f"blurred_image_{datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")}.png")
-            save_image(blurred_image_path, image_for_analysis) # Save blurred image
+            if debug_mode:
+                print(f"[DEBUG] Applying adaptive Gaussian blur.")
+            image_for_analysis, blurred_kernel_size = blur_image(image_for_analysis)
+            blurred_image_path = os.path.join(output_dir, f"blurred_image_{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}.png")
+            save_image(blurred_image_path, image_for_analysis)
             if debug_mode: print(f"[DEBUG] Blurred image saved to {blurred_image_path}")
 
         total_pixels = image_for_analysis.shape[0] * image_for_analysis.shape[1]
         if alpha_channel is not None:
-            total_pixels = cv2.countNonZero(alpha_channel) # Only count solid pixels
+            total_pixels = cv2.countNonZero(alpha_channel)
 
         mask, negative_mask = self.find_color_zones(image_for_analysis, lower_hsv, upper_hsv, alpha_channel, debug_mode=debug_mode)
 
         mask_pre_aggregation_path = None
         if aggregate_mode:
-            mask_pre_aggregation_path = os.path.join(output_dir, f"mask_pre_aggregation_{datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")}.png")
-            save_image(mask_pre_aggregation_path, mask) # Save mask before aggregation
+            mask_pre_aggregation_path = os.path.join(output_dir, f"mask_pre_aggregation_{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}.png")
+            save_image(mask_pre_aggregation_path, mask)
             if debug_mode: print(f"[DEBUG] Mask before aggregation saved to {mask_pre_aggregation_path}")
-
             mask = self._aggregate_mask_improved(mask, debug_mode=debug_mode)
-            negative_mask = cv2.bitwise_not(mask) # Recalculate negative mask after aggregation
+            negative_mask = cv2.bitwise_not(mask)
 
         percentage, matched_pixels = self.calculate_statistics(mask, total_pixels, debug_mode=debug_mode)
 
-        # Save output images
-        # Ensure output_dir exists
         os.makedirs(output_dir, exist_ok=True)
-
-        # Use unique filenames for output images
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+
         processed_image_path = os.path.join(output_dir, f"processed_image_{timestamp}.png")
         mask_path = os.path.join(output_dir, f"mask_{timestamp}.png")
         negative_mask_path = os.path.join(output_dir, f"negative_mask_{timestamp}.png")
 
-        # Create a visual representation of the processed image (e.g., original with mask overlay)
         processed_image = original_image.copy()
-        processed_image[mask == 0] = [0, 0, 0] # Black out non-matched areas
+        processed_image[mask == 0] = [0, 0, 0]
 
         save_image(processed_image_path, processed_image)
         save_image(mask_path, mask)
         save_image(negative_mask_path, negative_mask)
 
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        image_with_contours = original_image.copy()
+        cv2.drawContours(image_with_contours, contours, -1, (0, 0, 255), 2)
+        contours_image_path = os.path.join(output_dir, f"contours_{timestamp}.png")
+        save_image(contours_image_path, image_with_contours)
+
         return {
-            "original_image": original_image, # Return original image array
-            "processed_image": processed_image, # Return processed image array
-            "mask": mask, # Return mask array
-            "negative_mask": negative_mask, # Return negative mask array
-            "original_image_path": image_path, # Original path if provided
+            "original_image": original_image,
+            "processed_image": processed_image,
+            "mask": mask,
+            "negative_mask": negative_mask,
+            "original_image_path": image_path,
             "processed_image_path": processed_image_path,
             "mask_path": mask_path,
             "negative_mask_path": negative_mask_path,
+            "contours_image_path": contours_image_path,
             "percentage": percentage,
             "matched_pixels": matched_pixels,
             "total_pixels": total_pixels,
-            "mask_pre_aggregation_path": mask_pre_aggregation_path, # New: Path to mask before aggregation
-            "blurred_image_path": blurred_image_path, # New: Path to blurred image
-            "alignment_data": alignment_data # New: Geometrical alignment data
+            "mask_pre_aggregation_path": mask_pre_aggregation_path,
+            "blurred_image_path": blurred_image_path,
+            "blurred_kernel_size": blurred_kernel_size, # New: Kernel size used for blur
+            "alignment_data": alignment_data
         }

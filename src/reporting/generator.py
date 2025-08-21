@@ -9,7 +9,6 @@ from matplotlib.patches import Rectangle
 import shutil
 
 from src import config
-from src.color_analysis.project_manager import ProjectManager
 
 class ReportGenerator:
     """
@@ -27,9 +26,6 @@ class ReportGenerator:
         self.project_name = project_name
         self.project_output_dir = config.OUTPUT_DIR / project_name
         os.makedirs(self.project_output_dir, exist_ok=True)
-
-        # Ensure the assets directory exists
-        config.REPORT_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
         env = Environment(loader=FileSystemLoader(config.TEMPLATES_DIR))
         if debug_mode:
@@ -49,7 +45,7 @@ class ReportGenerator:
         pie_chart_path = self.project_output_dir / "pie_chart.png"
         plt.savefig(pie_chart_path)
         plt.close()
-        return "pie_chart.png" # Return relative path
+        return "pie_chart.png"
 
     def _generate_color_space_plot(self, lower_limit: np.ndarray, upper_limit: np.ndarray, center: tuple, gradient_height=25, num_lines=5) -> str:
         """
@@ -74,52 +70,74 @@ class ReportGenerator:
         color_space_plot_path = self.project_output_dir / "color_space_plot.png"
         plt.savefig(color_space_plot_path)
         plt.close()
-        return "color_space_plot.png" # Return relative path
+        return "color_space_plot.png"
 
-    def plot_hsv_color_space_3d(self, hsv_colors: np.ndarray, lower_hsv: np.ndarray, upper_hsv: np.ndarray, output_path: str) -> str:
+    def plot_hue_saturation_diagram(self, image_bgr: np.ndarray, lower_hsv: np.ndarray, upper_hsv: np.ndarray, output_path: str) -> str:
         """
-        Generates and saves a 3D plot of the HSV color space.
+        Generates and saves a 2D Hue-Saturation diagram of the image's color space.
+
+        Args:
+            image_bgr (np.ndarray): The input image in BGR format.
+            lower_hsv (np.ndarray): The lower bound of the HSV color range.
+            upper_hsv (np.ndarray): The upper bound of the HSV color range.
+            output_path (str): The relative path to save the generated plot.
+
+        Returns:
+            str: The relative path to the saved plot.
         """
-        fig = plt.figure(figsize=(10, 10))
-        ax = fig.add_subplot(111, projection='3d')
+        hsv_image = cv.cvtColor(image_bgr, cv.COLOR_BGR2HSV)
+        h, s, v = cv.split(hsv_image)
 
-        # Sample the colors to avoid plotting too many points
-        sample_size = min(len(hsv_colors), 10000)
-        sampled_colors = hsv_colors[np.random.choice(len(hsv_colors), sample_size, replace=False)]
+        # Flatten the arrays to get a list of pixels
+        h_flat = h.flatten()
+        s_flat = s.flatten()
+        v_flat = v.flatten()
+        
+        # Sample a subset of pixels to avoid plotting millions of points, which can be slow
+        sample_size = min(len(h_flat), 20000) # Plot up to 20,000 pixels
+        indices = np.random.choice(len(h_flat), sample_size, replace=False)
+        
+        h_sample = h_flat[indices]
+        s_sample = s_flat[indices]
+        v_sample = v_flat[indices]
 
-        # Convert HSV to RGB for plotting
-        rgb_colors = cv.cvtColor(np.uint8([sampled_colors]), cv.COLOR_HSV2RGB)[0] / 255.0
+        # Assemble the sampled HSV colors and convert them to RGB for plotting
+        # This is how we get the "real" color for each point
+        sampled_hsv = np.stack((h_sample, s_sample, v_sample), axis=-1)
+        sampled_rgb = cv.cvtColor(np.uint8([sampled_hsv]), cv.COLOR_HSV2RGB)[0] / 255.0
 
-        ax.scatter(sampled_colors[:, 0], sampled_colors[:, 1], sampled_colors[:, 2], c=rgb_colors, marker='o')
+        # Create the plot
+        fig, ax = plt.subplots(figsize=(10, 8))
 
-        # Draw wireframe box for the color range
-        l, u = lower_hsv, upper_hsv
-        x = [l[0], u[0], u[0], l[0], l[0], u[0], u[0], l[0]]
-        y = [l[1], l[1], u[1], u[1], l[1], l[1], u[1], u[1]]
-        z = [l[2], l[2], l[2], l[2], u[2], u[2], u[2], u[2]]
-        ax.plot([x[0], x[1]], [y[0], y[1]], [z[0], z[1]], color='r')
-        ax.plot([x[1], x[2]], [y[1], y[2]], [z[1], z[2]], color='r')
-        ax.plot([x[2], x[3]], [y[2], y[3]], [z[2], z[3]], color='r')
-        ax.plot([x[3], x[0]], [y[3], y[0]], [z[3], z[0]], color='r')
+        # Scatter plot of the image's colors, using the actual pixel colors
+        ax.scatter(h_sample, s_sample, c=sampled_rgb, alpha=0.5, s=10, label='Image Pixels')
 
-        ax.plot([x[4], x[5]], [y[4], y[5]], [z[4], z[5]], color='r')
-        ax.plot([x[5], x[6]], [y[5], y[6]], [z[5], z[6]], color='r')
-        ax.plot([x[6], x[7]], [y[6], y[7]], [z[6], z[7]], color='r')
-        ax.plot([x[7], x[4]], [y[7], y[4]], [z[7], z[4]], color='r')
+        # Draw a rectangle for the selected color range
+        rect_width = upper_hsv[0] - lower_hsv[0]
+        rect_height = upper_hsv[1] - lower_hsv[1]
+        selection_rect = Rectangle(
+            (lower_hsv[0], lower_hsv[1]), 
+            rect_width, 
+            rect_height,
+            linewidth=2, 
+            edgecolor='r', 
+            facecolor='none',
+            label='Selected Range'
+        )
+        ax.add_patch(selection_rect)
 
-        ax.plot([x[0], x[4]], [y[0], y[4]], [z[0], z[4]], color='r')
-        ax.plot([x[1], x[5]], [y[1], y[5]], [z[1], z[5]], color='r')
-        ax.plot([x[2], x[6]], [y[2], y[6]], [z[2], z[6]], color='r')
-        ax.plot([x[3], x[7]], [y[3], y[7]], [z[3], z[7]], color='r')
+        ax.set_xlabel('Hue (0-179)')
+        ax.set_ylabel('Saturation (0-255)')
+        ax.set_title('Hue-Saturation Color Distribution')
+        ax.set_xlim(0, 180)
+        ax.set_ylim(0, 256)
+        ax.legend()
+        ax.grid(True, linestyle='--', alpha=0.6)
 
-        ax.set_xlabel('Hue')
-        ax.set_ylabel('Saturation')
-        ax.set_zlabel('Value')
-        ax.set_title('HSV Color Space')
-
-        plot_path = self.project_output_dir / output_path
-        plt.savefig(plot_path)
-        plt.close()
+        plot_full_path = self.project_output_dir / output_path
+        plt.savefig(plot_full_path)
+        plt.close(fig)
+        
         return output_path
 
     def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None) -> None:
@@ -141,29 +159,25 @@ class ReportGenerator:
             analysis_results['center_color']
         )
 
-        # Generate 3D HSV plot
-        project_manager = ProjectManager()
-        file_paths = project_manager.get_project_file_paths(self.project_name)
-        hsv_colors = project_manager.get_hsv_colors_from_samples(file_paths['sample_image_configs'])
-        project_data = project_manager.get_project_data(self.project_name)
-        lower_hsv = project_data['lower_hsv']
-        upper_hsv = project_data['upper_hsv']
-
-        hsv_3d_plot_path_relative = self.plot_hsv_color_space_3d(hsv_colors, lower_hsv, upper_hsv, "hsv_3d_plot.png")
+        # Generate Hue-Saturation Diagram
+        chromaticity_diagram_path_relative = self.plot_hue_saturation_diagram(
+            image_bgr=analysis_results['original_image'],
+            lower_hsv=analysis_results['lower_limit'],
+            upper_hsv=analysis_results['upper_limit'],
+            output_path="hue_saturation_diagram.png"
+        )
 
         # Copy original input image to output directory and get relative path
-        original_input_image_filename = os.path.basename(analysis_results['original_input_image_path'])
+        original_input_image_filename = os.path.basename(analysis_results['original_image_path'])
         original_input_image_dest_path = self.project_output_dir / original_input_image_filename
-        shutil.copy(analysis_results['original_input_image_path'], original_input_image_dest_path)
+        shutil.copy(analysis_results['original_image_path'], original_input_image_dest_path)
         original_input_image_path_relative = original_input_image_filename
 
-        # Analyzed image is already saved in output_dir by ColorAnalyzer, just get relative path
         analyzed_image_path_relative = os.path.basename(analysis_results['analyzed_image_path'])
 
-        # Copy logo to output directory and get relative path
         logo_filename = os.path.basename(config.LOGO_PATH)
         logo_dest_path = self.project_output_dir / logo_filename
-        logo_path_relative = "" # Default to empty string if logo not found
+        logo_path_relative = ""
         try:
             shutil.copy(config.LOGO_PATH, logo_dest_path)
             logo_path_relative = logo_filename
@@ -172,7 +186,6 @@ class ReportGenerator:
         except Exception as e:
             print(f"[WARNING] An unexpected error occurred while copying logo: {e}. Report will be generated without a logo.")
 
-        # Get relative paths for other images saved by ColorAnalyzer
         processed_image_path_relative = os.path.basename(analysis_results['processed_image_path'])
         mask_path_relative = os.path.basename(analysis_results['mask_path'])
         negative_mask_path_relative = os.path.basename(analysis_results['negative_mask_path'])
@@ -188,17 +201,17 @@ class ReportGenerator:
             "today": datetime.datetime.now().strftime("%Y-%m-%d"),
             "part_number": metadata.get("part_number", "N/A"),
             "thickness": metadata.get("thickness", "N/A"),
-            "image_path": original_input_image_path_relative, # Original input image
-            "analyzed_image_path": analyzed_image_path_relative, # Image after correction, before analysis
+            "image_path": original_input_image_path_relative,
+            "analyzed_image_path": analyzed_image_path_relative,
             "color_space_plot_path": color_space_plot_path_relative,
-            "hsv_3d_plot_path": hsv_3d_plot_path_relative,
-            "image1_path": processed_image_path_relative, # Matched pixels
-            "image2_path": mask_path_relative, # Mask
-            "image3_path": pie_chart_path_relative, # Pie chart
-            "negative_mask_path": negative_mask_path_relative, # Negative mask
-            "mask_pre_aggregation_path": mask_pre_aggregation_path_relative, # New: Path to mask before aggregation
-            "blurred_image_path": blurred_image_path_relative, # New: Path to blurred image
-            "debug_data": debug_data # New: Debug information
+            "hsv_diagram_path": chromaticity_diagram_path_relative, # New key for the template
+            "image1_path": processed_image_path_relative,
+            "image2_path": mask_path_relative,
+            "image3_path": pie_chart_path_relative,
+            "negative_mask_path": negative_mask_path_relative,
+            "mask_pre_aggregation_path": mask_pre_aggregation_path_relative,
+            "blurred_image_path": blurred_image_path_relative,
+            "debug_data": debug_data
         }
 
         html_content = self.template.render(template_vars)
@@ -209,6 +222,5 @@ class ReportGenerator:
             html_file.write(html_content)
         print(f"HTML report saved to {report_html_path}")
 
-        # Use the project_output_dir as base_url for WeasyPrint to resolve relative paths
         HTML(string=html_content, base_url=str(self.project_output_dir)).write_pdf(report_pdf_path)
         print(f"PDF report saved to {report_pdf_path}")
