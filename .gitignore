@@ -80,6 +80,3 @@ output/
 
 # Environment variables
 .env
-
-# Output files
-output/
