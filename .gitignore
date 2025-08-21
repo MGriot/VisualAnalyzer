@@ -77,6 +77,3 @@ data/projects/*/cache/
 
 # Report outputs (can be large)
 output/
-
-# Environment variables
-.env
