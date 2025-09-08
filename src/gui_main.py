@@ -6,7 +6,7 @@ import threading
 
 # Assuming main_analysis_logic is a function in main.py that takes an args-like object
 # We will refactor main.py to expose this function
-from src.main import run_analysis_from_gui # This will be created in main.py
+from src.pipeline import run_analysis # This will be created in main.py
 
 print("---" + " Before VisualAnalyzerGUI class definition ---")
 class VisualAnalyzerGUI:
@@ -148,7 +148,7 @@ class VisualAnalyzerGUI:
             original_stdout = sys.stdout
             sys.stdout = self.OutputRedirector(self.output_console)
 
-            run_analysis_from_gui(args) # Call the refactored analysis logic
+            run_analysis(args) # Call the refactored analysis logic
 
         except Exception as e:
             self.log_message(f"Analysis Error: {e}")

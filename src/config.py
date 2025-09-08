@@ -25,5 +25,5 @@ YOLO_MODEL_PATH = ROOT_DIR / "models" / "ColourChecker" / "ColourChecker.pt"
 
 # --- Report Metadata ---
 AUTHOR = "Griot Matteo"
-DEPARTMENT = "Global Quality"
-REPORT_TITLE = "Under Layer Report"
+DEPARTMENT = "Department"
+REPORT_TITLE = "Test image type"

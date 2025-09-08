@@ -1,0 +1,64 @@
+{
+    "image_configs": [
+        {
+            "filename": "download.png",
+            "method": "points",
+            "points": [
+                {
+                    "x": 225,
+                    "y": 96,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "images.png",
+            "method": "points",
+            "points": [
+                {
+                    "x": 246,
+                    "y": 94,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "imagesa.png",
+            "method": "points",
+            "points": [
+                {
+                    "x": 109,
+                    "y": 54,
+                    "radius": 7
+                },
+                {
+                    "x": 110,
+                    "y": 27,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "s.png",
+            "method": "points",
+            "points": [
+                {
+                    "x": 233,
+                    "y": 115,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "Screenshot 2025-08-19 103712.jpg",
+            "method": "points",
+            "points": [
+                {
+                    "x": 46,
+                    "y": 41,
+                    "radius": 7
+                }
+            ]
+        }
+    ]
+}

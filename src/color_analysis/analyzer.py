@@ -81,7 +81,7 @@ class ColorAnalyzer:
 
         return percentage, matched_pixels
 
-    def process_image(self, image: np.ndarray = None, image_path: str = None, lower_hsv: np.ndarray = None, upper_hsv: np.ndarray = None, output_dir: str = None, debug_mode: bool = False, aggregate_mode: bool = False, blur_mode: bool = False, alignment_mode: bool = False, drawing_path: str = None) -> dict:
+    def process_image(self, image: np.ndarray = None, image_path: str = None, lower_hsv: np.ndarray = None, upper_hsv: np.ndarray = None, output_dir: str = None, debug_mode: bool = False, aggregate_mode: bool = False, alignment_mode: bool = False, drawing_path: str = None) -> dict:
         """
         Processes a single image for color analysis.
         """
@@ -122,16 +122,7 @@ class ColorAnalyzer:
             raise ValueError("output_dir must be provided.")
 
         image_for_analysis = original_image.copy()
-        blurred_image_path = None
-        blurred_kernel_size = None
-        if blur_mode:
-            if debug_mode:
-                print(f"[DEBUG] Applying adaptive Gaussian blur.")
-            image_for_analysis, blurred_kernel_size = blur_image(image_for_analysis)
-            blurred_image_path = os.path.join(output_dir, f"blurred_image_{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}.png")
-            save_image(blurred_image_path, image_for_analysis)
-            if debug_mode: print(f"[DEBUG] Blurred image saved to {blurred_image_path}")
-
+        
         total_pixels = image_for_analysis.shape[0] * image_for_analysis.shape[1]
         if alpha_channel is not None:
             total_pixels = cv2.countNonZero(alpha_channel)
@@ -182,7 +173,5 @@ class ColorAnalyzer:
             "matched_pixels": matched_pixels,
             "total_pixels": total_pixels,
             "mask_pre_aggregation_path": mask_pre_aggregation_path,
-            "blurred_image_path": blurred_image_path,
-            "blurred_kernel_size": blurred_kernel_size, # New: Kernel size used for blur
             "alignment_data": alignment_data
         }

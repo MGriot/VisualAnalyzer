@@ -174,9 +174,54 @@ def run_aligner_test(image_path: str = None):
     else:
         print("❌ Alignment failed.")
 
+import unittest
+
+class TestAligner(unittest.TestCase):
+
+    def test_align_image_by_markers(self):
+        # 1. Generate a distorted image with ArUco markers
+        marker_ids = [10, 20, 30, 40]
+        marker_size_px = 80
+        image_size_wh = (800, 600)
+        perspective_transform_params = {
+            "pts2": [[100, 50], [image_size_wh[0]-50, 0], [50, image_size_wh[1]-100], [image_size_wh[0]-100, image_size_wh[1]-50]]
+        }
+        distorted_image = create_distorted_aruco_image("distorted_aruco_test_image.png", marker_ids, marker_size_px, image_size_wh, perspective_transform_params)
+
+        # 2. Define marker_map and output_size_wh for alignment
+        margin = 50
+        fixed_marker_size_for_layout = 80
+        output_width, output_height = image_size_wh
+
+        ideal_marker_layout = {
+            10: [[margin, margin], [margin + fixed_marker_size_for_layout, margin], [margin + fixed_marker_size_for_layout, margin + fixed_marker_size_for_layout], [margin, margin + fixed_marker_size_for_layout]],
+            20: [[output_width - margin - fixed_marker_size_for_layout, margin], [output_width - margin, margin], [output_width - margin, margin + fixed_marker_size_for_layout], [output_width - margin - fixed_marker_size_for_layout, margin + fixed_marker_size_for_layout]],
+            30: [[output_width - margin - fixed_marker_size_for_layout, output_height - margin - fixed_marker_size_for_layout], [output_width - margin, output_height - margin - fixed_marker_size_for_layout], [output_width - margin, output_height - margin], [output_width - margin - fixed_marker_size_for_layout, output_height - margin]],
+            40: [[margin, output_height - margin - fixed_marker_size_for_layout], [margin + fixed_marker_size_for_layout, output_height - margin - fixed_marker_size_for_layout], [margin + fixed_marker_size_for_layout, output_height - margin], [margin, output_height - fixed_marker_size_for_layout]]
+        }
+        for key in ideal_marker_layout:
+            ideal_marker_layout[key] = np.array(ideal_marker_layout[key], dtype=np.float32)
+
+        # 3. Instantiate Aligner
+        from src.alignment.aligner import ArucoAligner
+        aligner = ArucoAligner(debug_mode=True, output_dir="test_output_dir")
+
+        # 4. Call aligner.align_image
+        aligned_image, _, _, _, _ = aligner.align_image_by_markers(
+            image=distorted_image,
+            marker_map=ideal_marker_layout,
+            output_size_wh=(output_width, output_height)
+        )
+
+        # 5. Verify the output
+        self.assertIsNotNone(aligned_image)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test ArUco Aligner with generated or external image.")
     parser.add_argument("--image_path", type=str, help="Optional: Path to an external image to test alignment.")
     args = parser.parse_args()
 
-    run_aligner_test(image_path=args.image_path)
+    if args.image_path:
+        run_aligner_test(image_path=args.image_path)
+    else:
+        unittest.main()

@@ -186,6 +186,66 @@ class ArucoAligner:
 
         return aligned_image, h, corners, ids, used_marker_map
 
+    def align_image_to_reference(self, image: np.ndarray, reference_image: np.ndarray):
+        """
+        Aligns an image to a reference image using ArUco markers.
+        """
+        if image is None:
+            raise ValueError("Input image is None.")
+        if reference_image is None:
+            raise ValueError("Reference image is None.")
+
+        # Detect markers in both images
+        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        src_corners, src_ids, _ = self.detector.detectMarkers(gray_image)
+
+        gray_ref_image = cv2.cvtColor(reference_image, cv2.COLOR_BGR2GRAY)
+        dst_corners, dst_ids, _ = self.detector.detectMarkers(gray_ref_image)
+
+        if src_ids is None or dst_ids is None:
+            if self.debug_mode:
+                print("[DEBUG] Not enough markers found in either the source or reference image.")
+            return None, None
+
+        # Find common markers
+        common_ids = np.intersect1d(src_ids, dst_ids)
+        if len(common_ids) < 4:
+            if self.debug_mode:
+                print(f"[DEBUG] Not enough common markers found. Needed at least 4, but found {len(common_ids)}.")
+            return None, None
+
+        # Get corners for common markers
+        src_points = []
+        dst_points = []
+        for marker_id in common_ids:
+            src_idx = np.where(src_ids == marker_id)[0][0]
+            dst_idx = np.where(dst_ids == marker_id)[0][0]
+            src_points.extend(src_corners[src_idx][0])
+            dst_points.extend(dst_corners[dst_idx][0])
+
+        src_points = np.array(src_points, dtype=np.float32)
+        dst_points = np.array(dst_points, dtype=np.float32)
+
+        # Calculate homography
+        h, mask = cv2.findHomography(src_points, dst_points, cv2.RANSAC, 5.0)
+
+        if h is None:
+            if self.debug_mode:
+                print("[DEBUG] Homography calculation failed.")
+            return None, None
+
+        # Warp image
+        output_size = (reference_image.shape[1], reference_image.shape[0])
+        aligned_image = cv2.warpPerspective(image, h, output_size)
+
+        if self.debug_mode:
+            print("[DEBUG] Alignment to reference successful.")
+            cv2.imwrite(
+                os.path.join(self.output_dir, "aruco_aligned_to_reference.png"), aligned_image
+            )
+
+        return aligned_image, h
+
 
 # The Aligner class and the __main__ block can remain exactly as you had them.
 class Aligner:
@@ -202,17 +262,34 @@ class Aligner:
             debug_mode=debug_mode, output_dir=aruco_output_dir
         )
 
-    def align_image(self, image: np.ndarray, marker_map: dict, output_size_wh: tuple):
-        # (This method's code is unchanged)
-        aligned_image, homography, corners, ids, used_map = (
-            self.aruco_aligner.align_image_by_markers(image, marker_map, output_size_wh)
-        )
-        alignment_data = None
-        if aligned_image is not None:
-            alignment_data = {
-                "homography_matrix": homography.tolist(),
-                "detected_corners": [c.tolist() for c in corners],
-                "detected_ids": ids.flatten().tolist(),
-                "used_marker_map": {k: v.tolist() for k, v in used_map.items()},
-            }
-        return aligned_image, alignment_data
+    def align_image(self, image: np.ndarray, aruco_reference_path: str = None, marker_map: dict = None, output_size_wh: tuple = None):
+        if aruco_reference_path:
+            reference_image = cv2.imread(aruco_reference_path)
+            if reference_image is None:
+                raise FileNotFoundError(f"Could not read ArUco reference image at: {aruco_reference_path}")
+            
+            aligned_image, homography = self.aruco_aligner.align_image_to_reference(image, reference_image)
+            
+            alignment_data = None
+            if aligned_image is not None:
+                alignment_data = {
+                    "homography_matrix": homography.tolist(),
+                }
+            return aligned_image, alignment_data
+
+        elif marker_map and output_size_wh:
+            aligned_image, homography, corners, ids, used_map = (
+                self.aruco_aligner.align_image_by_markers(image, marker_map, output_size_wh)
+            )
+            alignment_data = None
+            if aligned_image is not None:
+                alignment_data = {
+                    "homography_matrix": homography.tolist(),
+                    "detected_corners": [c.tolist() for c in corners],
+                    "detected_ids": ids.flatten().tolist(),
+                    "used_marker_map": {k: v.tolist() for k, v in used_map.items()},
+                }
+            return aligned_image, alignment_data
+        
+        else:
+            raise ValueError("Either 'aruco_reference_path' or both 'marker_map' and 'output_size_wh' must be provided for alignment.")

@@ -5,12 +5,12 @@ from pathlib import Path
 
 from src.utils.image_utils import load_image
 
-class SampleProcessor:
+class DatasetItemProcessor:
     """
-    Processes sample images to calculate HSV color ranges based on full image average or specified points.
+    Processes dataset item images to calculate HSV color ranges based on full image average or specified points.
     """
 
-    def calculate_hsv_from_full_image(self, image_path: Path, alpha_channel: np.ndarray = None) -> Tuple[float, float, float]:
+    def calculate_hsv_from_full_image(self, image_path: Path) -> Tuple[float, float, float]:
         """
         Calculates the average HSV color from the entire image.
         """
@@ -34,20 +34,18 @@ class SampleProcessor:
 
         return avg_h, avg_s, avg_v
 
-    def calculate_hsv_from_points(self, image_path: Path, points: List[Dict], radius: int = 7) -> Tuple[float, float, float]:
+    def calculate_hsv_from_points(self, image_path: Path, points: List[Dict], radius: int = 7) -> List[Tuple[float, float, float]]:
         """
-        Calculates the average HSV color from specified points within the image.
+        Calculates the average HSV color for the ROI of each specified point.
         Each point is a dictionary with 'x', 'y', and optional 'radius'.
+        Returns a list of average HSV tuples, one for each point.
         """
         img, alpha = load_image(str(image_path), handle_transparency=True)
         if img is None:
             raise ValueError(f"Could not load image {image_path}")
 
         hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-
-        h_values = []
-        s_values = []
-        v_values = []
+        point_avg_colors = []
 
         for point in points:
             x, y = point['x'], point['y']
@@ -68,18 +66,15 @@ class SampleProcessor:
                 non_transparent_pixels = roi_hsv.reshape(-1, 3)
 
             if len(non_transparent_pixels) > 0:
-                h_values.extend(non_transparent_pixels[:, 0])
-                s_values.extend(non_transparent_pixels[:, 1])
-                v_values.extend(non_transparent_pixels[:, 2])
+                avg_h = np.mean(non_transparent_pixels[:, 0])
+                avg_s = np.mean(non_transparent_pixels[:, 1])
+                avg_v = np.mean(non_transparent_pixels[:, 2])
+                point_avg_colors.append((avg_h, avg_s, avg_v))
 
-        if len(h_values) == 0:
-            raise ValueError(f"No valid pixels found around specified points in {image_path}.")
+        if not point_avg_colors:
+            raise ValueError(f"No valid pixels found around any of the specified points in {image_path}.")
 
-        avg_h = np.mean(h_values)
-        avg_s = np.mean(s_values)
-        avg_v = np.mean(v_values)
-
-        return avg_h, avg_s, avg_v
+        return point_avg_colors
 
     def extract_hsv_from_full_image(self, image_path: Path) -> np.ndarray:
         """

@@ -5,16 +5,19 @@ from typing import List, Tuple, Dict
 from pathlib import Path
 import json
 import time
+from pydantic import ValidationError
 
 from src import config
 from src.utils.image_utils import load_image
-from src.color_correction.corrector import ColorCorrector # Import ColorCorrector
-from src.sample_manager.processor import SampleProcessor # Import SampleProcessor
+from src.color_correction.corrector import ColorCorrector
+from src.sample_manager.dataset_item_processor import DatasetItemProcessor
+from src.config_models import ProjectConfig, DatasetItemProcessingConfig
+
 
 class ProjectManager:
     """
     Manages projects, including listing available projects, providing paths to
-    reference color checkers and sample images, and calculating average HSV colors.
+    reference color checkers and dataset images, and calculating average HSV colors.
     Also handles caching of calculated color correction matrices and HSV ranges.
     """
 
@@ -23,8 +26,8 @@ class ProjectManager:
         Initializes the ProjectManager.
         """
         self.projects_root = config.PROJECTS_DIR
-        self.color_corrector = ColorCorrector() # Initialize ColorCorrector
-        self.sample_processor = SampleProcessor() # Initialize SampleProcessor
+        self.color_corrector = ColorCorrector()
+        self.dataset_item_processor = DatasetItemProcessor()
         self.cache_dir = config.OUTPUT_DIR / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -45,9 +48,9 @@ class ProjectManager:
             return []
         return [d.name for d in self.projects_root.iterdir() if d.is_dir()]
 
-    def _get_project_config(self, project_name: str) -> Dict:
+    def _get_project_config(self, project_name: str) -> ProjectConfig:
         """
-        Reads the project's configuration file.
+        Reads and validates the project's configuration file.
         """
         project_path = self.projects_root / project_name
         config_file_path = project_path / "project_config.json"
@@ -56,20 +59,29 @@ class ProjectManager:
 
         with open(config_file_path, 'r') as f:
             config_data = json.load(f)
-        return config_data
+        
+        try:
+            return ProjectConfig(**config_data)
+        except ValidationError as e:
+            raise ValueError(f"Invalid project configuration for '{project_name}':\n{e}")
 
-    def _get_sample_processing_config(self, project_name: str) -> Dict:
+    def _get_dataset_item_processing_config(self, project_name: str) -> DatasetItemProcessingConfig:
         """
-        Reads the sample processing configuration file for a project.
+        Reads and validates the dataset item processing configuration file for a project.
         """
         project_path = self.projects_root / project_name
-        config_file_path = project_path / "sample_processing_config.json"
+        config_file_path = project_path / "dataset_item_processing_config.json"
         if not config_file_path.is_file():
-            return {"image_configs": []} # Return empty config if not found
+            return DatasetItemProcessingConfig(image_configs=[])
 
         with open(config_file_path, 'r') as f:
             config_data = json.load(f)
-        return config_data
+            
+        try:
+            return DatasetItemProcessingConfig(**config_data)
+        except ValidationError as e:
+            raise ValueError(f"Invalid dataset item processing configuration for '{project_name}':\n{e}")
+
 
     def get_project_file_paths(self, project_name: str, debug_mode: bool = False) -> Dict[str, Path | List[Path] | List[Dict]]:
         """
@@ -81,7 +93,7 @@ class ProjectManager:
 
         Returns:
             Dict[str, Path | List[Path] | List[Dict]]: A dictionary containing paths to the reference color checker,
-                                          color checker images for project calibration, and sample image configurations.
+                                          color checker images for project calibration, and dataset image configurations.
 
         Raises:
             ValueError: If the project or its configuration file does not exist.
@@ -92,89 +104,97 @@ class ProjectManager:
             raise ValueError(f"Project '{project_name}' not found.")
 
         config_data = self._get_project_config(project_name)
-        sample_processing_config = self._get_sample_processing_config(project_name)
+        dataset_item_processing_config = self._get_dataset_item_processing_config(project_name)
 
-        ref_color_checker_filename = config_data.get("reference_color_checker_filename")
-        colorchecker_ref_for_project_relative = config_data.get("colorchecker_reference_for_project", [])
-        technical_drawing_filename = config_data.get("technical_drawing_filename")
+        ref_color_checker_rel_path = config_data.reference_color_checker_path
+        colorchecker_ref_for_project_relative = config_data.colorchecker_reference_for_project
+        technical_drawing_rel_path = config_data.technical_drawing_path
+        aruco_ref_rel_path = config_data.aruco_reference_path
         
         # New: ArUco alignment configuration
-        aruco_marker_map = config_data.get("aruco_marker_map")
-        aruco_output_size = config_data.get("aruco_output_size")
+        aruco_marker_map = config_data.aruco_marker_map
+        aruco_output_size = config_data.aruco_output_size
 
-        if not ref_color_checker_filename:
-            raise ValueError(f"'reference_color_checker_filename' not specified in project_config.json for project '{project_name}'.")
+        if not ref_color_checker_rel_path:
+            raise ValueError(f"'reference_color_checker_path' not specified in project_config.json for project '{project_name}'.")
 
-        ref_color_checker_path = project_path / ref_color_checker_filename
+        ref_color_checker_path = project_path / ref_color_checker_rel_path
         if not ref_color_checker_path.is_file():
-            raise FileNotFoundError(f"Reference color checker '{ref_color_checker_filename}' not found for project '{project_name}'.")
+            raise FileNotFoundError(f"Reference color checker '{ref_color_checker_rel_path}' not found for project '{project_name}'.")
 
         technical_drawing_path = None
-        if technical_drawing_filename:
-            technical_drawing_path = project_path / technical_drawing_filename
+        if technical_drawing_rel_path:
+            technical_drawing_path = project_path / technical_drawing_rel_path
             if not technical_drawing_path.is_file():
-                if debug_mode: print(f"[DEBUG] Warning: Technical drawing '{technical_drawing_filename}' not found for project '{project_name}'. Skipping.")
+                if debug_mode: print(f"[DEBUG] Warning: Technical drawing '{technical_drawing_rel_path}' not found for project '{project_name}'. Skipping.")
                 technical_drawing_path = None
 
         colorchecker_ref_for_project_paths = []
-        for rel_path in colorchecker_ref_for_project_relative:
-            full_path = project_path / rel_path
-            if full_path.is_file():
-                colorchecker_ref_for_project_paths.append(full_path)
-            else:
-                if debug_mode: print(f"[DEBUG] Warning: Color checker reference image '{rel_path}' not found for project '{project_name}'. Skipping.")
-
-        # Dynamically discover sample images (all other files in folder, excluding specified color checkers)
-        sample_image_configs = []
-        excluded_files = {ref_color_checker_path.name} | {Path(p).name for p in colorchecker_ref_for_project_relative}
-        if technical_drawing_filename:
-            excluded_files.add(technical_drawing_filename)
-
-        if debug_mode: print(f"[DEBUG] Excluded files for sample discovery: {excluded_files}")
-
-        for item in project_path.iterdir():
-            if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg'] and item.name not in excluded_files:
-                # Check if there's a specific config for this image
-                img_config = next((cfg for cfg in sample_processing_config["image_configs"] if cfg["filename"] == item.name), None)
-                if img_config:
-                    sample_image_configs.append({"path": item, "method": img_config["method"], "points": img_config.get("points")})
+        if colorchecker_ref_for_project_relative:
+            for rel_path in colorchecker_ref_for_project_relative:
+                full_path = project_path / rel_path
+                if full_path.is_file():
+                    colorchecker_ref_for_project_paths.append(full_path)
                 else:
-                    sample_image_configs.append({"path": item, "method": "full_average"}) # Default to full average
-            elif item.is_dir() and item.name == "samples": # Include files from the 'samples' subdirectory
-                for sample_item in item.iterdir():
-                    if sample_item.is_file() and sample_item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                        img_config = next((cfg for cfg in sample_processing_config["image_configs"] if cfg["filename"] == sample_item.name), None)
-                        if img_config:
-                            sample_image_configs.append({"path": sample_item, "method": img_config["method"], "points": img_config.get("points")})
-                        else:
-                            sample_image_configs.append({"path": sample_item, "method": "full_average"}) # Default to full average
+                    if debug_mode: print(f"[DEBUG] Warning: Color checker reference image '{rel_path}' not found for project '{project_name}'. Skipping.")
 
-        if not sample_image_configs:
-            if debug_mode: print(f"[DEBUG] Warning: No valid sample images found for project '{project_name}'.")
+        aruco_ref_path = None
+        if aruco_ref_rel_path:
+            aruco_ref_path = project_path / aruco_ref_rel_path
+            if not aruco_ref_path.is_file():
+                if debug_mode: print(f"[DEBUG] Warning: ArUco reference image '{aruco_ref_rel_path}' not found for project '{project_name}'. Skipping.")
+                aruco_ref_path = None
+
+        # Dynamically discover dataset images from the 'dataset' folder
+        dataset_image_configs = []
+        dataset_path = project_path / "dataset"
+
+        if debug_mode: print(f"[DEBUG] Discovering samples in {dataset_path}")
+
+        if dataset_path.is_dir():
+            for item in dataset_path.iterdir():
+                if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                    # Check if there's a specific config for this image
+                    img_config = next((cfg for cfg in dataset_item_processing_config.image_configs if cfg.filename == item.name), None)
+                    if img_config:
+                        method = img_config.method
+                        points = img_config.points
+                        if method == "points" and not points:
+                            method = "full_average"
+                        points_as_dicts = [p.model_dump() for p in points] if points else None
+                        dataset_image_configs.append({"path": item, "method": method, "points": points_as_dicts})
+                    else:
+                        dataset_image_configs.append({"path": item, "method": "full_average"})
+
+        if not dataset_image_configs:
+            if debug_mode: print(f"[DEBUG] Warning: No valid dataset images found for project '{project_name}'.")
 
         if debug_mode:
             print(f"[DEBUG] Project '{project_name}' paths:")
             print(f"[DEBUG]   Reference Color Checker: {ref_color_checker_path}")
             print(f"[DEBUG]   Color Checker Refs for Project: {colorchecker_ref_for_project_paths}")
-            print(f"[DEBUG]   Sample Image Configurations: {sample_image_configs}")
+            print(f"[DEBUG]   Dataset Image Configurations: {dataset_image_configs}")
             if technical_drawing_path:
                 print(f"[DEBUG]   Technical Drawing: {technical_drawing_path}")
+            if aruco_ref_path:
+                print(f"[DEBUG]   ArUco Reference: {aruco_ref_path}")
 
         return {
             "reference_color_checker": ref_color_checker_path,
             "colorchecker_reference_for_project": colorchecker_ref_for_project_paths,
-            "sample_image_configs": sample_image_configs,
+            "dataset_image_configs": dataset_image_configs,
             "technical_drawing": technical_drawing_path,
+            "aruco_reference": aruco_ref_path,
             "aruco_marker_map": aruco_marker_map, # New
             "aruco_output_size": aruco_output_size # New
         }
 
-    def get_hsv_colors_from_samples(self, sample_image_configs: List[Dict], debug_mode: bool = False) -> np.ndarray:
+    def get_hsv_colors_from_dataset(self, dataset_image_configs: List[Dict], debug_mode: bool = False) -> np.ndarray:
         """
-        Extracts all HSV colors from a list of sample image configurations.
+        Extracts all HSV colors from a list of dataset image configurations.
 
         Args:
-            sample_image_configs (List[Dict]): A list of dictionaries, each containing 'path', 'method', and 'points' (if applicable).
+            dataset_image_configs (List[Dict]): A list of dictionaries, each containing 'path', 'method', and 'points' (if applicable).
             debug_mode (bool): If True, prints debug information.
 
         Returns:
@@ -182,114 +202,137 @@ class ProjectManager:
         """
         all_hsv_colors = []
 
-        if not sample_image_configs:
-            raise ValueError("No sample image configurations provided to extract HSV colors.")
+        if not dataset_image_configs:
+            raise ValueError("No dataset image configurations provided to extract HSV colors.")
 
-        if debug_mode: print(f"[DEBUG] Extracting HSV colors from {len(sample_image_configs)} sample image configurations.")
+        if debug_mode: print(f"[DEBUG] Extracting HSV colors from {len(dataset_image_configs)} dataset image configurations.")
 
-        for img_config in sample_image_configs:
-            sample_file_path = img_config['path']
+        for img_config in dataset_image_configs:
+            dataset_item_file_path = img_config['path']
             method = img_config['method']
             points = img_config.get('points')
 
             try:
                 if method == "full_average":
-                    hsv_colors = self.sample_processor.extract_hsv_from_full_image(sample_file_path)
-                    if debug_mode: print(f"[DEBUG]   Processed {sample_file_path.name} using full_average.")
+                    hsv_colors = self.dataset_item_processor.extract_hsv_from_full_image(dataset_item_file_path)
+                    if debug_mode: print(f"[DEBUG]   Processed {dataset_item_file_path.name} using full_average.")
                 elif method == "points":
-                    if not points: raise ValueError(f"Points not specified for {sample_file_path.name} with 'points' method.")
-                    hsv_colors = self.sample_processor.extract_hsv_from_points(sample_file_path, points)
-                    if debug_mode: print(f"[DEBUG]   Processed {sample_file_path.name} using points method with {len(points)} points.")
+                    if not points: raise ValueError(f"Points not specified for {dataset_item_file_path.name} with 'points' method.")
+                    hsv_colors = self.dataset_item_processor.extract_hsv_from_points(dataset_item_file_path, points)
+                    if debug_mode: print(f"[DEBUG]   Processed {dataset_item_file_path.name} using points method with {len(points)} points.")
                 else:
-                    if debug_mode: print(f"[DEBUG]   Unknown method '{method}' for {sample_file_path.name}. Skipping.")
+                    if debug_mode: print(f"[DEBUG]   Unknown method '{method}' for {dataset_item_file_path.name}. Skipping.")
                     continue
 
                 all_hsv_colors.append(hsv_colors)
 
             except Exception as e:
-                if debug_mode: print(f"[DEBUG] Warning: Error processing sample image {sample_file_path.name}: {e}. Skipping.")
+                if debug_mode: print(f"[DEBUG] Warning: Error processing dataset image {dataset_item_file_path.name}: {e}. Skipping.")
                 continue
 
         if not all_hsv_colors:
-            raise ValueError(f"No valid sample images processed or no non-transparent pixels in provided paths.")
+            raise ValueError(f"No valid dataset images processed or no non-transparent pixels in provided paths.")
 
         return np.vstack(all_hsv_colors)
 
-    def calculate_average_hsv_from_samples(self, sample_image_configs: List[Dict], debug_mode: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def calculate_hsv_range_from_dataset(self, dataset_image_configs: List[Dict], debug_mode: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]:
         """
-        Calculates the average HSV color (lower, upper, center) from a list of sample image configurations.
+        Calculates the HSV color range (lower, upper, center) from a list of dataset image configurations.
+        This method computes a bounding box around the average colors of the dataset images or points.
 
         Args:
-            sample_image_configs (List[Dict]): A list of dictionaries, each containing 'path', 'method', and 'points' (if applicable).
+            dataset_image_configs (List[Dict]): A list of dictionaries, each containing 'path', 'method', and 'points' (if applicable).
             debug_mode (bool): If True, prints debug information.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing the lower HSV limit,
-                                                      upper HSV limit, and the center HSV color.
+            Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]: A tuple containing the lower HSV limit,
+                                                                  upper HSV limit, the center HSV color,
+                                                                  and a list of dictionaries with debug info for each sample.
         """
-        h_values = []
-        s_values = []
-        v_values = []
+        all_hsv_colors = []
+        dataset_debug_info = []
 
-        if not sample_image_configs:
-            raise ValueError("No sample image configurations provided to calculate average HSV.")
+        if not dataset_image_configs:
+            raise ValueError("No dataset image configurations provided to calculate HSV range.")
 
-        if debug_mode: print(f"[DEBUG] Calculating average HSV from {len(sample_image_configs)} sample image configurations.")
+        if debug_mode: print(f"[DEBUG] Calculating HSV range from {len(dataset_image_configs)} sample image configurations.")
 
-        for img_config in sample_image_configs:
-            sample_file_path = img_config['path']
+        for img_config in dataset_image_configs:
+            dataset_item_file_path = img_config['path']
             method = img_config['method']
             points = img_config.get('points')
-
+            
             try:
                 if method == "full_average":
-                    avg_h, avg_s, avg_v = self.sample_processor.calculate_hsv_from_full_image(sample_file_path)
-                    if debug_mode: print(f"[DEBUG]   Processed {sample_file_path.name} using full_average.")
+                    avg_h, avg_s, avg_v = self.dataset_item_processor.calculate_hsv_from_full_image(dataset_item_file_path)
+                    all_hsv_colors.append((avg_h, avg_s, avg_v))
+                    avg_hsv_for_debug = np.array([[[avg_h, avg_s, avg_v]]], dtype=np.uint8)
+                    avg_bgr = cv2.cvtColor(avg_hsv_for_debug, cv2.COLOR_HSV2BGR)[0][0]
+                    dataset_debug_info.append({
+                        'path': str(dataset_item_file_path),
+                        'method': method,
+                        'points': None,
+                        'avg_color_bgr': avg_bgr.tolist()
+                    })
+                    if debug_mode: print(f"[DEBUG]   Processed {dataset_item_file_path.name} using full_average.")
+                
                 elif method == "points":
-                    if not points: raise ValueError(f"Points not specified for {sample_file_path.name} with 'points' method.")
-                    avg_h, avg_s, avg_v = self.sample_processor.calculate_hsv_from_points(sample_file_path, points)
-                    if debug_mode: print(f"[DEBUG]   Processed {sample_file_path.name} using points method with {len(points)} points.")
-                else:
-                    if debug_mode: print(f"[DEBUG]   Unknown method '{method}' for {sample_file_path.name}. Skipping.")
-                    continue
-
-                h_values.append(avg_h)
-                s_values.append(avg_s)
-                v_values.append(avg_v)
+                    if not points: raise ValueError(f"Points not specified for {dataset_item_file_path.name} with 'points' method.")
+                    
+                    point_colors_hsv = self.dataset_item_processor.calculate_hsv_from_points(dataset_item_file_path, points)
+                    all_hsv_colors.extend(point_colors_hsv)
+                    
+                    # For debug, we'll show the average of the points for that image
+                    avg_h = np.mean([c[0] for c in point_colors_hsv])
+                    avg_s = np.mean([c[1] for c in point_colors_hsv])
+                    avg_v = np.mean([c[2] for c in point_colors_hsv])
+                    avg_hsv_for_debug = np.array([[[avg_h, avg_s, avg_v]]], dtype=np.uint8)
+                    avg_bgr = cv2.cvtColor(avg_hsv_for_debug, cv2.COLOR_HSV2BGR)[0][0]
+                    dataset_debug_info.append({
+                        'path': str(dataset_item_file_path),
+                        'method': method,
+                        'points': points,
+                        'avg_color_bgr': avg_bgr.tolist()
+                    })
+                    if debug_mode: print(f"[DEBUG]   Processed {dataset_item_file_path.name} using points method with {len(points)} points.")
 
             except Exception as e:
-                if debug_mode: print(f"[DEBUG] Warning: Error processing sample image {sample_file_path.name}: {e}. Skipping.")
+                if debug_mode: print(f"[DEBUG] Warning: Error processing dataset image {dataset_item_file_path.name}: {e}. Skipping.")
                 continue
 
-        if not h_values:
-            raise ValueError(f"No valid sample images processed or no non-transparent pixels in provided paths.")
+        if not all_hsv_colors:
+            raise ValueError("Could not extract any HSV colors from the provided sample images.")
 
-        avg_h = np.mean(h_values)
-        avg_s = np.mean(s_values)
-        avg_v = np.mean(v_values)
+        h_values = [c[0] for c in all_hsv_colors]
+        s_values = [c[1] for c in all_hsv_colors]
+        v_values = [c[2] for c in all_hsv_colors]
 
-        # Define a tolerance for the color range
-        h_tolerance = 10  # Degrees
-        s_tolerance = 30  # Percentage
-        v_tolerance = 30  # Percentage
+        h_min, h_max = np.min(h_values), np.max(h_values)
+        s_min, s_max = np.min(s_values), np.max(s_values)
+        v_min, v_max = np.min(v_values), np.max(v_values)
 
-        lower_h = max(0, avg_h - h_tolerance)
-        upper_h = min(179, avg_h + h_tolerance)  # OpenCV HSV H range is 0-179
+        center_h, center_s, center_v = np.mean(h_values), np.mean(s_values), np.mean(v_values)
 
-        lower_s = max(0, avg_s - s_tolerance)
-        upper_s = min(255, avg_s + s_tolerance) # OpenCV HSV S range is 0-255
+        h_tolerance = 10
+        s_tolerance = 30
+        v_tolerance = 30
 
-        lower_v = max(0, avg_v - v_tolerance)
-        upper_v = min(255, avg_v + v_tolerance) # OpenCV HSV V range is 0-255
+        lower_h = max(0, int(h_min) - h_tolerance)
+        upper_h = min(179, int(h_max) + h_tolerance)
+        lower_s = max(0, int(s_min) - s_tolerance)
+        upper_s = min(255, int(s_max) + s_tolerance)
+        lower_v = max(0, int(v_min) - v_tolerance)
+        upper_v = min(255, int(v_max) + v_tolerance)
 
         lower_limit = np.array([lower_h, lower_s, lower_v], dtype=np.uint8)
         upper_limit = np.array([upper_h, upper_s, upper_v], dtype=np.uint8)
-        center_color = np.array([avg_h, avg_s, avg_v], dtype=np.uint8)
+        center_color = np.array([center_h, center_s, center_v], dtype=np.uint8)
 
         if debug_mode:
+            print(f"[DEBUG] Min/Max of All Dataset Item Colors: H({h_min:.2f}-{h_max:.2f}), S({s_min:.2f}-{s_max:.2f}), V({v_min:.2f}-{v_max:.2f})")
             print(f"[DEBUG] Calculated HSV Range: Lower={lower_limit}, Upper={upper_limit}, Center={center_color}")
 
-        return lower_limit, upper_limit, center_color
+        return lower_limit, upper_limit, center_color, dataset_debug_info
 
     def get_project_data(self, project_name: str, debug_mode: bool = False) -> Dict[str, any]:
         """
@@ -309,11 +352,11 @@ class ProjectManager:
         current_source_files.add(str(current_file_paths_dict['reference_color_checker']))
         for p in current_file_paths_dict['colorchecker_reference_for_project']:
             current_source_files.add(str(p))
-        for img_config in current_file_paths_dict['sample_image_configs']:
+        for img_config in current_file_paths_dict['dataset_image_configs']:
             current_source_files.add(str(img_config['path']))
             # Also add the sample_processing_config.json itself to the watched files
         current_source_files.add(str(self.projects_root / project_name / "project_config.json"))
-        current_source_files.add(str(self.projects_root / project_name / "sample_processing_config.json"))
+        current_source_files.add(str(self.projects_root / project_name / "dataset_item_processing_config.json"))
 
         if cache_file_path.exists():
             try:
@@ -326,6 +369,7 @@ class ProjectManager:
                 loaded_cache['data']['lower_hsv'] = np.array(loaded_cache['data']['lower_hsv'], dtype=np.uint8)
                 loaded_cache['data']['upper_hsv'] = np.array(loaded_cache['data']['upper_hsv'], dtype=np.uint8)
                 loaded_cache['data']['center_hsv'] = np.array(loaded_cache['data']['center_hsv'], dtype=np.uint8)
+                # dataset_debug_info is already a list of dicts, so no conversion is needed
 
                 cached_data = loaded_cache['data']
                 source_file_timestamps = loaded_cache['source_file_timestamps']
@@ -378,7 +422,7 @@ class ProjectManager:
                 if debug_mode: print(f"[DEBUG] Warning: Could not calculate project color alignment matrix: {e}. Using identity matrix.")
 
         # Calculate HSV range
-        lower_hsv, upper_hsv, center_hsv = self.calculate_average_hsv_from_samples(file_paths['sample_image_configs'], debug_mode=debug_mode)
+        lower_hsv, upper_hsv, center_hsv, dataset_debug_info = self.calculate_hsv_range_from_dataset(file_paths['dataset_image_configs'], debug_mode=debug_mode)
         if debug_mode: print("[DEBUG] Project HSV range calculated.")
 
         # Store in cache
@@ -386,16 +430,17 @@ class ProjectManager:
         for p in file_paths['colorchecker_reference_for_project']:
             source_file_timestamps[str(p)] = p.stat().st_mtime
         source_file_timestamps[str(file_paths['reference_color_checker'])] = file_paths['reference_color_checker'].stat().st_mtime
-        for img_config in file_paths['sample_image_configs']:
+        for img_config in file_paths['dataset_image_configs']:
             source_file_timestamps[str(img_config['path'])] = img_config['path'].stat().st_mtime
         source_file_timestamps[str(self.projects_root / project_name / "project_config.json")] = (self.projects_root / project_name / "project_config.json").stat().st_mtime
-        source_file_timestamps[str(self.projects_root / project_name / "sample_processing_config.json")] = (self.projects_root / project_name / "sample_processing_config.json").stat().st_mtime
+        source_file_timestamps[str(self.projects_root / project_name / "dataset_item_processing_config.json")] = (self.projects_root / project_name / "dataset_item_processing_config.json").stat().st_mtime
 
         cached_data_to_save = {
             'correction_matrix': correction_matrix.tolist(), # Convert NumPy array to list for JSON serialization
             'lower_hsv': lower_hsv.tolist(),
             'upper_hsv': upper_hsv.tolist(),
             'center_hsv': center_hsv.tolist(),
+            'dataset_debug_info': dataset_debug_info,
         }
         
         full_cache_entry = {
@@ -412,4 +457,5 @@ class ProjectManager:
             'lower_hsv': lower_hsv,
             'upper_hsv': upper_hsv,
             'center_hsv': center_hsv,
+            'dataset_debug_info': dataset_debug_info,
         }

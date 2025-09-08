@@ -28,6 +28,7 @@ class ReportGenerator:
         os.makedirs(self.project_output_dir, exist_ok=True)
 
         env = Environment(loader=FileSystemLoader(config.TEMPLATES_DIR))
+        env.filters['basename'] = os.path.basename
         if debug_mode:
             self.template = env.get_template("Report_Debug.html")
         else:
@@ -93,7 +94,7 @@ class ReportGenerator:
         s_flat = s.flatten()
         v_flat = v.flatten()
         
-        # Sample a subset of pixels to avoid plotting millions of points, which can be slow
+        # Sample a subset of pixels for plotting to avoid plotting millions of points, which can be slow
         sample_size = min(len(h_flat), 20000) # Plot up to 20,000 pixels
         indices = np.random.choice(len(h_flat), sample_size, replace=False)
         
@@ -113,8 +114,8 @@ class ReportGenerator:
         ax.scatter(h_sample, s_sample, c=sampled_rgb, alpha=0.5, s=10, label='Image Pixels')
 
         # Draw a rectangle for the selected color range
-        rect_width = upper_hsv[0] - lower_hsv[0]
-        rect_height = upper_hsv[1] - lower_hsv[1]
+        rect_width = int(upper_hsv[0]) - int(lower_hsv[0])
+        rect_height = int(upper_hsv[1]) - int(lower_hsv[1])
         selection_rect = Rectangle(
             (lower_hsv[0], lower_hsv[1]), 
             rect_width, 
@@ -139,6 +140,41 @@ class ReportGenerator:
         plt.close(fig)
         
         return output_path
+
+    def _process_dataset_debug_info(self, dataset_debug_info: list) -> list:
+        processed_items = []
+        for i, item in enumerate(dataset_debug_info):
+            processed_item = item.copy()
+            original_path = item['path']
+            img = cv.imread(original_path)
+
+            # Create a copy for drawing
+            img_with_points = img.copy()
+
+            # Draw points if they exist
+            if item['method'] == 'points' and item['points']:
+                for point in item['points']:
+                    cv.circle(img_with_points, (point['x'], point['y']), point['radius'], (0, 0, 255), 2)
+
+            # Save the image with points
+            img_with_points_filename = f"dataset_{i}_with_points.png"
+            img_with_points_path = self.project_output_dir / img_with_points_filename
+            cv.imwrite(str(img_with_points_path), img_with_points)
+            processed_item['image_with_points_path'] = img_with_points_filename
+
+            # Create color palette
+            palette = np.full((100, 100, 3), 255, np.uint8)
+            avg_color_bgr = item.get('avg_color_bgr')
+            if avg_color_bgr:
+                cv.rectangle(palette, (0, 0), (100, 100), tuple(avg_color_bgr), -1)
+            
+            palette_filename = f"dataset_{i}_palette.png"
+            palette_path = self.project_output_dir / palette_filename
+            cv.imwrite(str(palette_path), palette)
+            processed_item['palette_path'] = palette_filename
+            
+            processed_items.append(processed_item)
+        return processed_items
 
     def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None) -> None:
         """
@@ -190,8 +226,25 @@ class ReportGenerator:
         mask_path_relative = os.path.basename(analysis_results['mask_path'])
         negative_mask_path_relative = os.path.basename(analysis_results['negative_mask_path'])
         
-        mask_pre_aggregation_path_relative = os.path.basename(analysis_results['mask_pre_aggregation_path']) if analysis_results['mask_pre_aggregation_path'] else None
-        blurred_image_path_relative = os.path.basename(analysis_results['blurred_image_path']) if analysis_results['blurred_image_path'] else None
+        mask_pre_aggregation_path = analysis_results.get('mask_pre_aggregation_path')
+        mask_pre_aggregation_path_relative = os.path.basename(mask_pre_aggregation_path) if mask_pre_aggregation_path else None
+        blurred_image_path = analysis_results.get('blurred_image_path')
+        blurred_image_path_relative = os.path.basename(blurred_image_path) if blurred_image_path else None
+
+        # ... (previous code)
+
+        # --- Symmetry Analysis --- 
+        symmetry_data = None
+        if debug_data and 'symmetry_visualizations' in debug_data:
+            symmetry_data = {
+                'visualizations': debug_data['symmetry_visualizations'],
+                'scores': {k: v for k, v in debug_data.items() if k.startswith('Symmetry:')}
+            }
+
+        # --- Dataset Debug Info ---
+        processed_dataset_info = None
+        if debug_data and 'dataset_debug_info' in debug_data:
+            processed_dataset_info = self._process_dataset_debug_info(debug_data['dataset_debug_info'])
 
         template_vars = {
             "author": config.AUTHOR,
@@ -211,7 +264,9 @@ class ReportGenerator:
             "negative_mask_path": negative_mask_path_relative,
             "mask_pre_aggregation_path": mask_pre_aggregation_path_relative,
             "blurred_image_path": blurred_image_path_relative,
-            "debug_data": debug_data
+            "debug_data": debug_data,
+            "symmetry_data": symmetry_data,
+            "dataset_debug_info": processed_dataset_info,
         }
 
         html_content = self.template.render(template_vars)
