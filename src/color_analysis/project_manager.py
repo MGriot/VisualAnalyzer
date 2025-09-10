@@ -110,6 +110,7 @@ class ProjectManager:
         colorchecker_ref_for_project_relative = config_data.colorchecker_reference_for_project
         technical_drawing_rel_path = config_data.technical_drawing_path
         aruco_ref_rel_path = config_data.aruco_reference_path
+        training_rel_path = config_data.training_path
         
         # New: ArUco alignment configuration
         aruco_marker_map = config_data.aruco_marker_map
@@ -118,9 +119,18 @@ class ProjectManager:
         if not ref_color_checker_rel_path:
             raise ValueError(f"'reference_color_checker_path' not specified in project_config.json for project '{project_name}'.")
 
-        ref_color_checker_path = project_path / ref_color_checker_rel_path
-        if not ref_color_checker_path.is_file():
-            raise FileNotFoundError(f"Reference color checker '{ref_color_checker_rel_path}' not found for project '{project_name}'.")
+        ref_color_checker_dir = project_path / ref_color_checker_rel_path
+        if not ref_color_checker_dir.is_dir():
+            raise FileNotFoundError(f"Reference color checker directory '{ref_color_checker_rel_path}' not found for project '{project_name}'.")
+
+        ref_color_checker_path = None
+        for item in ref_color_checker_dir.iterdir():
+            if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                ref_color_checker_path = item
+                break
+        
+        if not ref_color_checker_path:
+            raise FileNotFoundError(f"No reference color checker image found in '{ref_color_checker_dir}'.")
 
         technical_drawing_path = None
         if technical_drawing_rel_path:
@@ -140,10 +150,22 @@ class ProjectManager:
 
         aruco_ref_path = None
         if aruco_ref_rel_path:
-            aruco_ref_path = project_path / aruco_ref_rel_path
-            if not aruco_ref_path.is_file():
-                if debug_mode: print(f"[DEBUG] Warning: ArUco reference image '{aruco_ref_rel_path}' not found for project '{project_name}'. Skipping.")
-                aruco_ref_path = None
+            aruco_ref_dir = project_path / aruco_ref_rel_path
+            if aruco_ref_dir.is_dir():
+                for item in aruco_ref_dir.iterdir():
+                    if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                        aruco_ref_path = item
+                        break
+            if not aruco_ref_path and debug_mode:
+                print(f"[DEBUG] Warning: No ArUco reference image found in '{aruco_ref_dir}'. Skipping.")
+
+        training_image_configs = []
+        if training_rel_path:
+            training_path = project_path / training_rel_path
+            if training_path.is_dir():
+                for item in training_path.iterdir():
+                    if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                        training_image_configs.append({"path": item, "method": "full_average"})
 
         # Dynamically discover dataset images from the 'dataset' folder
         dataset_image_configs = []
@@ -183,6 +205,7 @@ class ProjectManager:
             "reference_color_checker": ref_color_checker_path,
             "colorchecker_reference_for_project": colorchecker_ref_for_project_paths,
             "dataset_image_configs": dataset_image_configs,
+            "training_image_configs": training_image_configs,
             "technical_drawing": technical_drawing_path,
             "aruco_reference": aruco_ref_path,
             "aruco_marker_map": aruco_marker_map, # New
@@ -422,7 +445,7 @@ class ProjectManager:
                 if debug_mode: print(f"[DEBUG] Warning: Could not calculate project color alignment matrix: {e}. Using identity matrix.")
 
         # Calculate HSV range
-        lower_hsv, upper_hsv, center_hsv, dataset_debug_info = self.calculate_hsv_range_from_dataset(file_paths['dataset_image_configs'], debug_mode=debug_mode)
+        lower_hsv, upper_hsv, center_hsv, dataset_debug_info = self.calculate_hsv_range_from_dataset(file_paths['training_image_configs'], debug_mode=debug_mode)
         if debug_mode: print("[DEBUG] Project HSV range calculated.")
 
         # Store in cache

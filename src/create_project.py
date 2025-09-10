@@ -62,19 +62,24 @@ def create_project(project_name: str):
         # Create directories
         dataset_path = project_path / "dataset"
         colorchecker_path = dataset_path / "colorchecker"
-        samples_path = dataset_path / "samples"
-        sample_path = project_path / "sample"
-        aruco_path = project_path / "aruco"
+        aruco_path = dataset_path / "aruco"
+        training_path = dataset_path / "training"
+        samples_path = project_path / "samples"
+        mock_sample_path = samples_path / "test"
+        mock_sample_colorchecker_path = mock_sample_path / "colorchecker"
+        mock_sample_sample_path = mock_sample_path / "sample"
 
         colorchecker_path.mkdir(parents=True, exist_ok=True)
-        samples_path.mkdir(exist_ok=True)
-        sample_path.mkdir(exist_ok=True)
         aruco_path.mkdir(exist_ok=True)
+        training_path.mkdir(exist_ok=True)
+        mock_sample_colorchecker_path.mkdir(parents=True, exist_ok=True)
+        mock_sample_sample_path.mkdir(exist_ok=True)
 
         print(f"Created directory: {colorchecker_path}")
-        print(f"Created directory: {samples_path}")
-        print(f"Created directory: {sample_path}")
         print(f"Created directory: {aruco_path}")
+        print(f"Created directory: {training_path}")
+        print(f"Created directory: {mock_sample_colorchecker_path}")
+        print(f"Created directory: {mock_sample_sample_path}")
 
         # Generate default ArUco reference
         aruco_ref_filename = "default_aruco_reference.png"
@@ -83,9 +88,10 @@ def create_project(project_name: str):
         # Create project_config.json
         project_config_path = project_path / "project_config.json"
         default_project_config = {
-            "reference_color_checker_path": "dataset/colorchecker/your_reference_color_checker.png",
+            "reference_color_checker_path": "dataset/colorchecker",
+            "training_path": "dataset/training",
             "technical_drawing_path": None,
-            "aruco_reference_path": f"aruco/{aruco_ref_filename}",
+            "aruco_reference_path": "dataset/aruco",
             "aruco_marker_map": {},
             "aruco_output_size": [1000, 1000]
         }

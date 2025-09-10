@@ -1,0 +1,31 @@
+{
+    "image_configs": [
+        {
+            "filename": "imagesa.png",
+            "method": "points",
+            "points": [
+                {
+                    "x": 111,
+                    "y": 49,
+                    "radius": 7
+                },
+                {
+                    "x": 14,
+                    "y": 24,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "s.png",
+            "method": "points",
+            "points": [
+                {
+                    "x": 237,
+                    "y": 106,
+                    "radius": 7
+                }
+            ]
+        }
+    ]
+}

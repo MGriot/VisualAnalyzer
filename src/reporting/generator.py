@@ -15,16 +15,23 @@ class ReportGenerator:
     A class to generate analysis reports in HTML and PDF formats.
     """
 
-    def __init__(self, project_name: str, debug_mode: bool = False):
+    def __init__(self, project_name: str, sample_name: str = None, debug_mode: bool = False):
         """
         Initializes the ReportGenerator.
 
         Args:
             project_name (str): The name of the project for which the report is generated.
+            sample_name (str, optional): The name of the sample being processed. Defaults to None.
             debug_mode (bool): If True, loads the debug report template.
         """
         self.project_name = project_name
-        self.project_output_dir = config.OUTPUT_DIR / project_name
+        self.sample_name = sample_name
+        
+        if sample_name:
+            self.project_output_dir = config.OUTPUT_DIR / project_name / sample_name
+        else:
+            self.project_output_dir = config.OUTPUT_DIR / project_name
+        
         os.makedirs(self.project_output_dir, exist_ok=True)
 
         env = Environment(loader=FileSystemLoader(config.TEMPLATES_DIR))
@@ -34,24 +41,40 @@ class ReportGenerator:
         else:
             self.template = env.get_template("Report_Default.html")
 
+    def get_step_output_dir(self, step_name: str):
+        """
+        Creates and returns the path to a step-specific output directory.
+
+        Args:
+            step_name (str): The name of the analysis step.
+
+        Returns:
+            The path to the step-specific output directory.
+        """
+        step_dir = self.project_output_dir / step_name
+        os.makedirs(step_dir, exist_ok=True)
+        return step_dir
+
     def _generate_pie_chart(self, matched_pixels: int, total_pixels: int, selected_colors: dict) -> str:
         """
         Generates and saves a pie chart showing matched vs. unmatched pixels.
         """
+        step_dir = self.get_step_output_dir("reporting")
         labels = ["Matched Pixels", "Unmatched Pixels"]
         sizes = [matched_pixels, total_pixels - matched_pixels]
         colors = [selected_colors["RGB"] / 255, "darkgray"]
         plt.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=140)
         plt.axis("equal")
-        pie_chart_path = self.project_output_dir / "pie_chart.png"
+        pie_chart_path = step_dir / "pie_chart.png"
         plt.savefig(pie_chart_path)
         plt.close()
-        return "pie_chart.png"
+        return os.path.relpath(pie_chart_path, self.project_output_dir)
 
     def _generate_color_space_plot(self, lower_limit: np.ndarray, upper_limit: np.ndarray, center: tuple, gradient_height=25, num_lines=5) -> str:
         """
         Generates and saves a color space plot.
         """
+        step_dir = self.get_step_output_dir("reporting")
         lower_rgb = cv.cvtColor(np.uint8([[lower_limit]]), cv.COLOR_HSV2RGB)[0][0]
         upper_rgb = cv.cvtColor(np.uint8([[upper_limit]]), cv.COLOR_HSV2RGB)[0][0]
         center_rgb = cv.cvtColor(np.uint8([[center]]), cv.COLOR_HSV2RGB)[0][0]
@@ -68,10 +91,10 @@ class ReportGenerator:
         rect = Rectangle((center_x - 1, 0), 2, gradient_height * num_lines, linewidth=0, facecolor=center_rgb / 255)
         ax.add_patch(rect)
 
-        color_space_plot_path = self.project_output_dir / "color_space_plot.png"
+        color_space_plot_path = step_dir / "color_space_plot.png"
         plt.savefig(color_space_plot_path)
         plt.close()
-        return "color_space_plot.png"
+        return os.path.relpath(color_space_plot_path, self.project_output_dir)
 
     def plot_hue_saturation_diagram(self, image_bgr: np.ndarray, lower_hsv: np.ndarray, upper_hsv: np.ndarray, output_path: str) -> str:
         """
@@ -86,6 +109,7 @@ class ReportGenerator:
         Returns:
             str: The relative path to the saved plot.
         """
+        step_dir = self.get_step_output_dir("reporting")
         hsv_image = cv.cvtColor(image_bgr, cv.COLOR_BGR2HSV)
         h, s, v = cv.split(hsv_image)
 
@@ -135,13 +159,14 @@ class ReportGenerator:
         ax.legend()
         ax.grid(True, linestyle='--', alpha=0.6)
 
-        plot_full_path = self.project_output_dir / output_path
+        plot_full_path = step_dir / output_path
         plt.savefig(plot_full_path)
         plt.close(fig)
         
-        return output_path
+        return os.path.relpath(plot_full_path, self.project_output_dir)
 
     def _process_dataset_debug_info(self, dataset_debug_info: list) -> list:
+        step_dir = self.get_step_output_dir("reporting")
         processed_items = []
         for i, item in enumerate(dataset_debug_info):
             processed_item = item.copy()
@@ -158,9 +183,9 @@ class ReportGenerator:
 
             # Save the image with points
             img_with_points_filename = f"dataset_{i}_with_points.png"
-            img_with_points_path = self.project_output_dir / img_with_points_filename
+            img_with_points_path = step_dir / img_with_points_filename
             cv.imwrite(str(img_with_points_path), img_with_points)
-            processed_item['image_with_points_path'] = img_with_points_filename
+            processed_item['image_with_points_path'] = os.path.relpath(img_with_points_path, self.project_output_dir)
 
             # Create color palette
             palette = np.full((100, 100, 3), 255, np.uint8)
@@ -169,9 +194,9 @@ class ReportGenerator:
                 cv.rectangle(palette, (0, 0), (100, 100), tuple(avg_color_bgr), -1)
             
             palette_filename = f"dataset_{i}_palette.png"
-            palette_path = self.project_output_dir / palette_filename
+            palette_path = step_dir / palette_filename
             cv.imwrite(str(palette_path), palette)
-            processed_item['palette_path'] = palette_filename
+            processed_item['palette_path'] = os.path.relpath(palette_path, self.project_output_dir)
             
             processed_items.append(processed_item)
         return processed_items
@@ -204,32 +229,33 @@ class ReportGenerator:
         )
 
         # Copy original input image to output directory and get relative path
+        reporting_dir = self.get_step_output_dir("reporting")
         original_input_image_filename = os.path.basename(analysis_results['original_image_path'])
-        original_input_image_dest_path = self.project_output_dir / original_input_image_filename
+        original_input_image_dest_path = reporting_dir / original_input_image_filename
         shutil.copy(analysis_results['original_image_path'], original_input_image_dest_path)
-        original_input_image_path_relative = original_input_image_filename
+        original_input_image_path_relative = os.path.relpath(original_input_image_dest_path, self.project_output_dir)
 
-        analyzed_image_path_relative = os.path.basename(analysis_results['analyzed_image_path'])
+        analyzed_image_path_relative = os.path.relpath(analysis_results['analyzed_image_path'], self.project_output_dir)
 
         logo_filename = os.path.basename(config.LOGO_PATH)
-        logo_dest_path = self.project_output_dir / logo_filename
+        logo_dest_path = reporting_dir / logo_filename
         logo_path_relative = ""
         try:
             shutil.copy(config.LOGO_PATH, logo_dest_path)
-            logo_path_relative = logo_filename
+            logo_path_relative = os.path.relpath(logo_dest_path, self.project_output_dir)
         except FileNotFoundError:
             print(f"[WARNING] Logo file not found at {config.LOGO_PATH}. Report will be generated without a logo.")
         except Exception as e:
             print(f"[WARNING] An unexpected error occurred while copying logo: {e}. Report will be generated without a logo.")
 
-        processed_image_path_relative = os.path.basename(analysis_results['processed_image_path'])
-        mask_path_relative = os.path.basename(analysis_results['mask_path'])
-        negative_mask_path_relative = os.path.basename(analysis_results['negative_mask_path'])
+        processed_image_path_relative = os.path.relpath(analysis_results['processed_image_path'], self.project_output_dir)
+        mask_path_relative = os.path.relpath(analysis_results['mask_path'], self.project_output_dir)
+        negative_mask_path_relative = os.path.relpath(analysis_results['negative_mask_path'], self.project_output_dir)
         
         mask_pre_aggregation_path = analysis_results.get('mask_pre_aggregation_path')
-        mask_pre_aggregation_path_relative = os.path.basename(mask_pre_aggregation_path) if mask_pre_aggregation_path else None
+        mask_pre_aggregation_path_relative = os.path.relpath(mask_pre_aggregation_path, self.project_output_dir) if mask_pre_aggregation_path else None
         blurred_image_path = analysis_results.get('blurred_image_path')
-        blurred_image_path_relative = os.path.basename(blurred_image_path) if blurred_image_path else None
+        blurred_image_path_relative = os.path.relpath(blurred_image_path, self.project_output_dir) if blurred_image_path else None
 
         # ... (previous code)
 

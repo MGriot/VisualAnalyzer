@@ -16,6 +16,7 @@ class DatasetItemProcessingConfig(BaseModel):
 
 class ProjectConfig(BaseModel):
     reference_color_checker_path: str
+    training_path: str
     colorchecker_reference_for_project: Optional[List[str]] = None
     technical_drawing_path: Optional[str] = None
     aruco_reference_path: Optional[str] = None
