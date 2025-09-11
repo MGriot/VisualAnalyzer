@@ -35,11 +35,11 @@ class ColorAnalyzer:
 
         return mask, negative_mask
 
-    def _aggregate_mask_improved(self, mask: np.ndarray, kernel_size: int = 7, min_area_ratio: float = 0.0005, debug_mode: bool = False) -> np.ndarray:
+    def _aggregate_mask_improved(self, mask: np.ndarray, kernel_size: int, min_area_ratio: float, agg_density_thresh: float, debug_mode: bool = False) -> np.ndarray:
         """
         Aggregates nearby matched pixel areas in a binary mask.
         """
-        if debug_mode: print(f"[DEBUG] Improved aggregating mask with kernel_size={kernel_size}, min_area_ratio={min_area_ratio}")
+        if debug_mode: print(f"[DEBUG] Improved aggregating mask with kernel_size={kernel_size}, min_area_ratio={min_area_ratio}, density_thresh={agg_density_thresh}")
 
         dilate_kernel = np.ones((kernel_size, kernel_size), np.uint8)
         dilated_mask = cv2.dilate(mask, dilate_kernel, iterations=1)
@@ -50,16 +50,23 @@ class ColorAnalyzer:
         total_image_area = mask.shape[0] * mask.shape[1]
 
         for i in range(1, num_labels):
-            area = stats[i, cv2.CC_STAT_AREA]
-            if area >= total_image_area * min_area_ratio:
-                component_mask = np.zeros_like(mask, dtype=np.uint8)
-                component_mask[labels == i] = 255
-                contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if contours:
-                    cv2.drawContours(aggregated_mask, contours, -1, 255, cv2.FILLED)
-                if debug_mode: print(f"[DEBUG]   Kept and filled component {i} with area {area}.")
+            component_area = stats[i, cv2.CC_STAT_AREA]
+            if component_area >= total_image_area * min_area_ratio:
+                component_mask = (labels == i).astype(np.uint8) * 255
+                
+                # Density Check
+                original_pixels_in_component = cv2.countNonZero(cv2.bitwise_and(mask, component_mask))
+                density = original_pixels_in_component / component_area if component_area > 0 else 0
+
+                if density >= agg_density_thresh:
+                    contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    if contours:
+                        cv2.drawContours(aggregated_mask, contours, -1, 255, cv2.FILLED)
+                    if debug_mode: print(f"[DEBUG]   Kept component {i} with area {component_area} and density {density:.2f}.")
+                else:
+                    if debug_mode: print(f"[DEBUG]   Rejected component {i} with area {component_area} due to low density ({density:.2f} < {agg_density_thresh}).")
             else:
-                if debug_mode: print(f"[DEBUG]   Filtered out component {i} with area {area} (too small).")
+                if debug_mode: print(f"[DEBUG]   Filtered out component {i} with area {component_area} (too small).")
         
         final_aggregated_mask = cv2.bitwise_or(aggregated_mask, mask)
         
@@ -81,7 +88,7 @@ class ColorAnalyzer:
 
         return percentage, matched_pixels
 
-    def process_image(self, image: np.ndarray = None, image_path: str = None, lower_hsv: np.ndarray = None, upper_hsv: np.ndarray = None, output_dir: str = None, debug_mode: bool = False, aggregate_mode: bool = False, alignment_mode: bool = False, drawing_path: str = None) -> dict:
+    def process_image(self, image: np.ndarray = None, image_path: str = None, lower_hsv: np.ndarray = None, upper_hsv: np.ndarray = None, output_dir: str = None, debug_mode: bool = False, aggregate_mode: bool = False, alignment_mode: bool = False, drawing_path: str = None, agg_kernel_size: int = 7, agg_min_area: float = 0.0005, agg_density_thresh: float = 0.5) -> dict:
         """
         Processes a single image for color analysis.
         """
@@ -134,7 +141,7 @@ class ColorAnalyzer:
             mask_pre_aggregation_path = os.path.join(output_dir, f"mask_pre_aggregation_{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}.png")
             save_image(mask_pre_aggregation_path, mask)
             if debug_mode: print(f"[DEBUG] Mask before aggregation saved to {mask_pre_aggregation_path}")
-            mask = self._aggregate_mask_improved(mask, debug_mode=debug_mode)
+            mask = self._aggregate_mask_improved(mask, kernel_size=agg_kernel_size, min_area_ratio=agg_min_area, agg_density_thresh=agg_density_thresh, debug_mode=debug_mode)
             negative_mask = cv2.bitwise_not(mask)
 
         percentage, matched_pixels = self.calculate_statistics(mask, total_pixels, debug_mode=debug_mode)

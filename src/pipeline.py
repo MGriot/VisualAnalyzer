@@ -130,7 +130,14 @@ def process_image(image_path, args, project_manager, color_corrector, color_anal
         blurred_kernel_size = None
         if args.blur:
             step_dir = report_generator.get_step_output_dir("blur")
-            image_for_processing, blurred_kernel_size = blur_image(image_for_processing)
+            custom_kernel = None
+            if args.blur_kernel:
+                if args.blur_kernel[0] % 2 == 0 or args.blur_kernel[1] % 2 == 0:
+                    print("[WARNING] Both blur kernel dimensions must be odd. Using adaptive kernel instead.")
+                else:
+                    custom_kernel = tuple(args.blur_kernel)
+            
+            image_for_processing, blurred_kernel_size = blur_image(image_for_processing, kernel_size=custom_kernel)
             if args.debug:
                 path = os.path.join(step_dir, "blurred_debug.png")
                 save_image(path, image_for_processing)
@@ -163,7 +170,10 @@ def process_image(image_path, args, project_manager, color_corrector, color_anal
             image=image_for_processing, image_path=image_path, lower_hsv=lower_hsv, upper_hsv=upper_hsv,
             output_dir=step_dir, debug_mode=args.debug,
             aggregate_mode=args.aggregate,
-            alignment_mode=False, drawing_path=None # These are handled externally now
+            alignment_mode=False, drawing_path=None, # These are handled externally now
+            agg_kernel_size=args.agg_kernel_size,
+            agg_min_area=args.agg_min_area,
+            agg_density_thresh=args.agg_density_thresh
         )
         analysis_results['blurred_kernel_size'] = blurred_kernel_size
 
@@ -286,7 +296,7 @@ def process_image(image_path, args, project_manager, color_corrector, color_anal
             print(f"[DEBUG] Contents of debug_data_for_report before report generation: {debug_data_for_report}")
             print(f"[DEBUG] Symmetry visualizations: {debug_data_for_report.get('symmetry_visualizations')}")
 
-        report_generator.generate_report(analysis_results, metadata, debug_data=debug_data_for_report)
+        report_generator.generate_report(analysis_results, metadata, debug_data=debug_data_for_report, report_type=args.report_type)
 
     except (ValueError, FileNotFoundError) as e:
         print(f"Error: {e}")

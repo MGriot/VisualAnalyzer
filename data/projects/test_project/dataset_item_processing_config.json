@@ -1,6 +1,50 @@
 {
     "image_configs": [
         {
+            "filename": "download.jpg",
+            "method": "points",
+            "points": [
+                {
+                    "x": 137,
+                    "y": 141,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "download.png",
+            "method": "points",
+            "points": [
+                {
+                    "x": 245,
+                    "y": 100,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "ds.png",
+            "method": "points",
+            "points": [
+                {
+                    "x": 152,
+                    "y": 93,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "images.png",
+            "method": "points",
+            "points": [
+                {
+                    "x": 170,
+                    "y": 80,
+                    "radius": 7
+                }
+            ]
+        },
+        {
             "filename": "imagesa.png",
             "method": "points",
             "points": [
@@ -17,12 +61,44 @@
             ]
         },
         {
-            "filename": "s.png",
+            "filename": "Screenshot 2025-08-19 095715.jpg",
             "method": "points",
             "points": [
                 {
-                    "x": 237,
-                    "y": 106,
+                    "x": 32,
+                    "y": 42,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "Screenshot 2025-08-19 103712.jpg",
+            "method": "points",
+            "points": [
+                {
+                    "x": 80,
+                    "y": 66,
+                    "radius": 7
+                }
+            ]
+        },
+        {
+            "filename": "image.png",
+            "method": "points",
+            "points": []
+        },
+        {
+            "filename": "s.png",
+            "method": "points",
+            "points": []
+        },
+        {
+            "filename": "Screenshot 2025-08-19 095734.jpg",
+            "method": "points",
+            "points": [
+                {
+                    "x": 5,
+                    "y": 7,
                     "radius": 7
                 }
             ]

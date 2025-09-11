@@ -295,7 +295,8 @@ class ProjectManager:
                         'path': str(dataset_item_file_path),
                         'method': method,
                         'points': None,
-                        'avg_color_bgr': avg_bgr.tolist()
+                        'avg_color_bgr': avg_bgr.tolist(),
+                        'hsv_colors': [(avg_h, avg_s, avg_v)]
                     })
                     if debug_mode: print(f"[DEBUG]   Processed {dataset_item_file_path.name} using full_average.")
                 
@@ -315,7 +316,8 @@ class ProjectManager:
                         'path': str(dataset_item_file_path),
                         'method': method,
                         'points': points,
-                        'avg_color_bgr': avg_bgr.tolist()
+                        'avg_color_bgr': avg_bgr.tolist(),
+                        'hsv_colors': point_colors_hsv
                     })
                     if debug_mode: print(f"[DEBUG]   Processed {dataset_item_file_path.name} using points method with {len(points)} points.")
 
@@ -326,34 +328,44 @@ class ProjectManager:
         if not all_hsv_colors:
             raise ValueError("Could not extract any HSV colors from the provided sample images.")
 
-        h_values = [c[0] for c in all_hsv_colors]
-        s_values = [c[1] for c in all_hsv_colors]
-        v_values = [c[2] for c in all_hsv_colors]
+        h_values = np.array([c[0] for c in all_hsv_colors])
+        s_values = np.array([c[1] for c in all_hsv_colors])
+        v_values = np.array([c[2] for c in all_hsv_colors])
 
-        h_min, h_max = np.min(h_values), np.max(h_values)
-        s_min, s_max = np.min(s_values), np.max(s_values)
-        v_min, v_max = np.min(v_values), np.max(v_values)
+        def get_robust_range(values):
+            if len(values) == 0:
+                return 0, 0
 
+            q1 = np.percentile(values, 25)
+            q3 = np.percentile(values, 75)
+            iqr = q3 - q1
+            
+            lower_bound = q1 - 1.5 * iqr
+            upper_bound = q3 + 1.5 * iqr
+            
+            filtered_values = values[(values >= lower_bound) & (values <= upper_bound)]
+            
+            if len(filtered_values) == 0:
+                final_lower = np.min(values)
+                final_upper = np.max(values)
+            else:
+                final_lower = np.min(filtered_values)
+                final_upper = np.max(filtered_values)
+
+            return int(final_lower), int(final_upper)
+
+        lower_h, upper_h = get_robust_range(h_values)
+        lower_s, upper_s = get_robust_range(s_values)
+        lower_v, upper_v = get_robust_range(v_values)
+        
         center_h, center_s, center_v = np.mean(h_values), np.mean(s_values), np.mean(v_values)
-
-        h_tolerance = 10
-        s_tolerance = 30
-        v_tolerance = 30
-
-        lower_h = max(0, int(h_min) - h_tolerance)
-        upper_h = min(179, int(h_max) + h_tolerance)
-        lower_s = max(0, int(s_min) - s_tolerance)
-        upper_s = min(255, int(s_max) + s_tolerance)
-        lower_v = max(0, int(v_min) - v_tolerance)
-        upper_v = min(255, int(v_max) + v_tolerance)
 
         lower_limit = np.array([lower_h, lower_s, lower_v], dtype=np.uint8)
         upper_limit = np.array([upper_h, upper_s, upper_v], dtype=np.uint8)
         center_color = np.array([center_h, center_s, center_v], dtype=np.uint8)
 
         if debug_mode:
-            print(f"[DEBUG] Min/Max of All Dataset Item Colors: H({h_min:.2f}-{h_max:.2f}), S({s_min:.2f}-{s_max:.2f}), V({v_min:.2f}-{v_max:.2f})")
-            print(f"[DEBUG] Calculated HSV Range: Lower={lower_limit}, Upper={upper_limit}, Center={center_color}")
+            print(f"[DEBUG] Statistically Calculated HSV Range: Lower={lower_limit}, Upper={upper_limit}, Center={center_color}")
 
         return lower_limit, upper_limit, center_color, dataset_debug_info
 

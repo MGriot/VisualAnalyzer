@@ -3,12 +3,33 @@ import datetime
 import cv2 as cv
 import matplotlib.pyplot as plt
 import numpy as np
-from jinja2 import Environment, FileSystemLoader
-from weasyprint import HTML
-from matplotlib.patches import Rectangle
 import shutil
+import json
+from pathlib import Path
 
 from src import config
+from src.reporting.archiver import ReportArchiver
+
+# Graceful imports for reporting libraries
+try:
+    from jinja2 import Environment, FileSystemLoader
+    from weasyprint import HTML
+    HAS_WEASYPRINT = True
+except ImportError:
+    HAS_WEASYPRINT = False
+
+try:
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    HAS_REPORTLAB = True
+except ImportError:
+    HAS_REPORTLAB = False
+
+from matplotlib.patches import Rectangle
 
 class ReportGenerator:
     """
@@ -16,14 +37,6 @@ class ReportGenerator:
     """
 
     def __init__(self, project_name: str, sample_name: str = None, debug_mode: bool = False):
-        """
-        Initializes the ReportGenerator.
-
-        Args:
-            project_name (str): The name of the project for which the report is generated.
-            sample_name (str, optional): The name of the sample being processed. Defaults to None.
-            debug_mode (bool): If True, loads the debug report template.
-        """
         self.project_name = project_name
         self.sample_name = sample_name
         
@@ -34,36 +47,30 @@ class ReportGenerator:
         
         os.makedirs(self.project_output_dir, exist_ok=True)
 
-        env = Environment(loader=FileSystemLoader(config.TEMPLATES_DIR))
-        env.filters['basename'] = os.path.basename
-        if debug_mode:
-            self.template = env.get_template("Report_Debug.html")
+        if HAS_WEASYPRINT:
+            self.env = Environment(loader=FileSystemLoader(config.TEMPLATES_DIR))
+            self.env.filters['basename'] = os.path.basename
+            template_name = "Report_Debug.html" if debug_mode else "Report_Default.html"
+            try:
+                self.template = self.env.get_template(template_name)
+            except Exception as e:
+                print(f"[WARNING] Could not load template {template_name}: {e}")
+                self.template = None
         else:
-            self.template = env.get_template("Report_Default.html")
+            self.env = None
+            self.template = None
 
     def get_step_output_dir(self, step_name: str):
-        """
-        Creates and returns the path to a step-specific output directory.
-
-        Args:
-            step_name (str): The name of the analysis step.
-
-        Returns:
-            The path to the step-specific output directory.
-        """
         step_dir = self.project_output_dir / step_name
         os.makedirs(step_dir, exist_ok=True)
         return step_dir
 
     def _generate_pie_chart(self, matched_pixels: int, total_pixels: int, selected_colors: dict) -> str:
-        """
-        Generates and saves a pie chart showing matched vs. unmatched pixels.
-        """
         step_dir = self.get_step_output_dir("reporting")
         labels = ["Matched Pixels", "Unmatched Pixels"]
         sizes = [matched_pixels, total_pixels - matched_pixels]
-        colors = [selected_colors["RGB"] / 255, "darkgray"]
-        plt.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=140)
+        colors_pie = [selected_colors["RGB"] / 255, "darkgray"]
+        plt.pie(sizes, labels=labels, colors=colors_pie, autopct="%1.1f%%", startangle=140)
         plt.axis("equal")
         pie_chart_path = step_dir / "pie_chart.png"
         plt.savefig(pie_chart_path)
@@ -71,9 +78,6 @@ class ReportGenerator:
         return os.path.relpath(pie_chart_path, self.project_output_dir)
 
     def _generate_color_space_plot(self, lower_limit: np.ndarray, upper_limit: np.ndarray, center: tuple, gradient_height=25, num_lines=5) -> str:
-        """
-        Generates and saves a color space plot.
-        """
         step_dir = self.get_step_output_dir("reporting")
         lower_rgb = cv.cvtColor(np.uint8([[lower_limit]]), cv.COLOR_HSV2RGB)[0][0]
         upper_rgb = cv.cvtColor(np.uint8([[upper_limit]]), cv.COLOR_HSV2RGB)[0][0]
@@ -97,211 +101,267 @@ class ReportGenerator:
         return os.path.relpath(color_space_plot_path, self.project_output_dir)
 
     def plot_hue_saturation_diagram(self, image_bgr: np.ndarray, lower_hsv: np.ndarray, upper_hsv: np.ndarray, output_path: str) -> str:
-        """
-        Generates and saves a 2D Hue-Saturation diagram of the image's color space.
-
-        Args:
-            image_bgr (np.ndarray): The input image in BGR format.
-            lower_hsv (np.ndarray): The lower bound of the HSV color range.
-            upper_hsv (np.ndarray): The upper bound of the HSV color range.
-            output_path (str): The relative path to save the generated plot.
-
-        Returns:
-            str: The relative path to the saved plot.
-        """
         step_dir = self.get_step_output_dir("reporting")
         hsv_image = cv.cvtColor(image_bgr, cv.COLOR_BGR2HSV)
         h, s, v = cv.split(hsv_image)
 
-        # Flatten the arrays to get a list of pixels
-        h_flat = h.flatten()
-        s_flat = s.flatten()
-        v_flat = v.flatten()
-        
-        # Sample a subset of pixels for plotting to avoid plotting millions of points, which can be slow
-        sample_size = min(len(h_flat), 20000) # Plot up to 20,000 pixels
+        h_flat, s_flat = h.flatten(), s.flatten()
+        sample_size = min(len(h_flat), 20000)
         indices = np.random.choice(len(h_flat), sample_size, replace=False)
         
-        h_sample = h_flat[indices]
-        s_sample = s_flat[indices]
-        v_sample = v_flat[indices]
+        h_sample, s_sample, v_sample = h_flat[indices], s_flat[indices], v.flatten()[indices]
 
-        # Assemble the sampled HSV colors and convert them to RGB for plotting
-        # This is how we get the "real" color for each point
         sampled_hsv = np.stack((h_sample, s_sample, v_sample), axis=-1)
         sampled_rgb = cv.cvtColor(np.uint8([sampled_hsv]), cv.COLOR_HSV2RGB)[0] / 255.0
 
-        # Create the plot
         fig, ax = plt.subplots(figsize=(10, 8))
-
-        # Scatter plot of the image's colors, using the actual pixel colors
         ax.scatter(h_sample, s_sample, c=sampled_rgb, alpha=0.5, s=10, label='Image Pixels')
 
-        # Draw a rectangle for the selected color range
-        rect_width = int(upper_hsv[0]) - int(lower_hsv[0])
-        rect_height = int(upper_hsv[1]) - int(lower_hsv[1])
-        selection_rect = Rectangle(
-            (lower_hsv[0], lower_hsv[1]), 
-            rect_width, 
-            rect_height,
-            linewidth=2, 
-            edgecolor='r', 
-            facecolor='none',
-            label='Selected Range'
-        )
+        rect_width, rect_height = int(upper_hsv[0]) - int(lower_hsv[0]), int(upper_hsv[1]) - int(lower_hsv[1])
+        selection_rect = Rectangle((lower_hsv[0], lower_hsv[1]), rect_width, rect_height, linewidth=2, edgecolor='r', facecolor='none', label='Selected Range')
         ax.add_patch(selection_rect)
 
-        ax.set_xlabel('Hue (0-179)')
-        ax.set_ylabel('Saturation (0-255)')
-        ax.set_title('Hue-Saturation Color Distribution')
-        ax.set_xlim(0, 180)
-        ax.set_ylim(0, 256)
+        ax.set(xlabel='Hue (0-179)', ylabel='Saturation (0-255)', title='Hue-Saturation Color Distribution', xlim=(0, 180), ylim=(0, 256))
         ax.legend()
         ax.grid(True, linestyle='--', alpha=0.6)
 
         plot_full_path = step_dir / output_path
         plt.savefig(plot_full_path)
         plt.close(fig)
-        
         return os.path.relpath(plot_full_path, self.project_output_dir)
+
+    def _generate_dataset_color_space_plot(self, dataset_debug_info: list, lower_hsv: np.ndarray, upper_hsv: np.ndarray) -> str:
+        step_dir = self.get_step_output_dir("reporting")
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        for item in dataset_debug_info:
+            hsv_colors = item.get('hsv_colors', [])
+            if not hsv_colors: continue
+
+            h_vals, s_vals = [c[0] for c in hsv_colors], [c[1] for c in hsv_colors]
+            avg_hsv = np.uint8([[[np.mean(h_vals), np.mean(s_vals), np.mean([c[2] for c in hsv_colors])]]])
+            avg_rgb = cv.cvtColor(avg_hsv, cv.COLOR_HSV2RGB)[0][0] / 255.0
+
+            ax.scatter(h_vals, s_vals, color=avg_rgb, label=os.path.basename(item['path']), s=50, alpha=0.8, edgecolors='black')
+
+        rect_width, rect_height = int(upper_hsv[0]) - int(lower_hsv[0]), int(upper_hsv[1]) - int(lower_hsv[1])
+        selection_rect = Rectangle((lower_hsv[0], lower_hsv[1]), rect_width, rect_height, linewidth=2, edgecolor='r', facecolor='none', label='Calculated Range')
+        ax.add_patch(selection_rect)
+
+        ax.set(xlabel='Hue (0-179)', ylabel='Saturation (0-255)', title='Training Data Color Space Definition', xlim=(0, 180), ylim=(0, 256))
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        fig.tight_layout(rect=[0, 0, 0.85, 1])
+
+        plot_path = step_dir / "dataset_color_space.png"
+        plt.savefig(plot_path)
+        plt.close(fig)
+        return os.path.relpath(plot_path, self.project_output_dir)
 
     def _process_dataset_debug_info(self, dataset_debug_info: list) -> list:
         step_dir = self.get_step_output_dir("reporting")
         processed_items = []
         for i, item in enumerate(dataset_debug_info):
             processed_item = item.copy()
-            original_path = item['path']
-            img = cv.imread(original_path)
+            img = cv.imread(item['path'])
+            if img is None: continue
 
-            # Create a copy for drawing
             img_with_points = img.copy()
-
-            # Draw points if they exist
-            if item['method'] == 'points' and item['points']:
+            if item.get('method') == 'points' and item.get('points'):
                 for point in item['points']:
                     cv.circle(img_with_points, (point['x'], point['y']), point['radius'], (0, 0, 255), 2)
 
-            # Save the image with points
-            img_with_points_filename = f"dataset_{i}_with_points.png"
-            img_with_points_path = step_dir / img_with_points_filename
-            cv.imwrite(str(img_with_points_path), img_with_points)
-            processed_item['image_with_points_path'] = os.path.relpath(img_with_points_path, self.project_output_dir)
+            img_path = step_dir / f"dataset_{i}_with_points.png"
+            cv.imwrite(str(img_path), img_with_points)
+            processed_item['image_with_points_path'] = os.path.relpath(img_path, self.project_output_dir)
 
-            # Create color palette
             palette = np.full((100, 100, 3), 255, np.uint8)
-            avg_color_bgr = item.get('avg_color_bgr')
-            if avg_color_bgr:
-                cv.rectangle(palette, (0, 0), (100, 100), tuple(avg_color_bgr), -1)
+            if item.get('avg_color_bgr'):
+                cv.rectangle(palette, (0, 0), (100, 100), tuple(map(int, item['avg_color_bgr'])), -1)
             
-            palette_filename = f"dataset_{i}_palette.png"
-            palette_path = step_dir / palette_filename
+            palette_path = step_dir / f"dataset_{i}_palette.png"
             cv.imwrite(str(palette_path), palette)
             processed_item['palette_path'] = os.path.relpath(palette_path, self.project_output_dir)
-            
             processed_items.append(processed_item)
         return processed_items
 
-    def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None) -> None:
-        """
-        Generates an HTML and PDF report from the analysis results.
-        """
-        total_pixels = analysis_results['total_pixels']
-        matched_pixels = analysis_results['matched_pixels']
+    def _generate_reportlab_pdf(self, report_data: dict, base_dir: Path, pdf_path: str):
+        doc = SimpleDocTemplate(str(pdf_path), pagesize=A4, topMargin=inch/2, bottomMargin=inch/2)
+        styles = getSampleStyleSheet()
+        story = []
 
-        pie_chart_path_relative = self._generate_pie_chart(
-            matched_pixels,
-            total_pixels,
-            analysis_results['selected_colors']
-        )
+        title_style = styles['h1']
+        h2_style = styles['h2']
+        h3_style = styles['h3']
+        body_style = styles['BodyText']
+        code_style = styles['Code']
 
-        color_space_plot_path_relative = self._generate_color_space_plot(
-            analysis_results['lower_limit'],
-            analysis_results['upper_limit'],
-            analysis_results['center_color']
-        )
+        def add_image(path_key, caption_text, width=6*inch):
+            img_path_str = report_data.get(path_key) or (isinstance(path_key, str) and path_key)
+            if not isinstance(img_path_str, str) or not img_path_str:
+                return
+            
+            img_path = base_dir / img_path_str
+            if img_path.is_file():
+                story.append(Paragraph(caption_text, h3_style))
+                try:
+                    img = Image(str(img_path), width=width, height=width/1.5, kind='proportional')
+                    story.append(img)
+                    story.append(Spacer(1, 0.1*inch))
+                except Exception as e:
+                    story.append(Paragraph(f"<i>Could not load image: {os.path.basename(img_path_str)} ({e})</i>", body_style))
+            else:
+                story.append(Paragraph(f"<i>{caption_text} (Image not found at {img_path_str})</i>", body_style))
 
-        # Generate Hue-Saturation Diagram
-        chromaticity_diagram_path_relative = self.plot_hue_saturation_diagram(
-            image_bgr=analysis_results['original_image'],
-            lower_hsv=analysis_results['lower_limit'],
-            upper_hsv=analysis_results['upper_limit'],
-            output_path="hue_saturation_diagram.png"
-        )
+        story.append(Paragraph(report_data.get('report_title', 'Analysis Report'), title_style))
+        story.append(Spacer(1, 0.2*inch))
 
-        # Copy original input image to output directory and get relative path
+        meta_table = Table([
+            ['Author:', report_data.get('author', 'N/A'), 'Part Number:', report_data.get('part_number', 'N/A')],
+            ['Date:', report_data.get('today', 'N/A'), 'Thickness:', report_data.get('thickness', 'N/A')]
+        ], colWidths=[1*inch, 2.5*inch, 1*inch, 2.5*inch])
+        story.append(meta_table)
+        story.append(Spacer(1, 0.2*inch))
+
+        add_image('analyzed_image_path', 'Analyzed Image')
+        add_image('hsv_diagram_path', 'Hue-Saturation Diagram')
+        add_image('pie_chart_path', 'Pixel-Percentage Pie Chart', width=4*inch)
+
+        if report_data.get("debug_data"):
+            story.append(PageBreak())
+            story.append(Paragraph("Debug Information", title_style))
+            debug_data = report_data["debug_data"]
+
+            story.append(Paragraph("Analysis Details", h2_style))
+            debug_table_data = []
+            for key, value in debug_data.items():
+                if key in ['image_pipeline', 'dataset_debug_info', 'symmetry_visualizations', '--- Project Info ---', '--- Analysis Settings ---', '--- Analysis Results ---', '--- Symmetry Analysis Results ---']:
+                    continue
+                value_str = json.dumps(value, indent=2) if isinstance(value, (dict, list)) else str(value)
+                debug_table_data.append([Paragraph(str(key), body_style), Paragraph(value_str.replace('\n', '<br/>'), code_style)])
+
+            if debug_table_data:
+                tbl = Table(debug_table_data, colWidths=[2*inch, 4.5*inch], repeatRows=1)
+                tbl.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (0,-1), colors.lightgrey),
+                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                    ('GRID', (0,0), (-1,-1), 1, colors.black),
+                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ]))
+                story.append(tbl)
+            story.append(Spacer(1, 0.2*inch))
+
+            if 'image_pipeline' in debug_data:
+                story.append(PageBreak())
+                story.append(Paragraph("Image Processing Pipeline", h2_style))
+                for step in debug_data['image_pipeline']:
+                    add_image(step['path'], step['title'])
+            
+            if debug_data.get('symmetry_visualizations'):
+                story.append(PageBreak())
+                story.append(Paragraph("Symmetry Analysis", h2_style))
+                story.append(Paragraph("Scores:", h3_style))
+                symmetry_scores = [[k,v] for k,v in debug_data.items() if k.startswith('Symmetry:')] 
+                if symmetry_scores:
+                    tbl = Table(symmetry_scores, colWidths=[2.5*inch, 4*inch])
+                    tbl.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (0,-1), colors.lightgrey),
+                        ('GRID', (0,0), (-1,-1), 1, colors.black),
+                    ]))
+                    story.append(tbl)
+                    story.append(Spacer(1, 0.2*inch))
+                
+                story.append(Paragraph("Visualizations:", h3_style))
+                for step in debug_data['symmetry_visualizations']:
+                    add_image(step['path'], step['title'])
+
+            if report_data.get('dataset_color_space_plot_path'):
+                story.append(PageBreak())
+                story.append(Paragraph("Dataset Color Space Definition", h2_style))
+                add_image('dataset_color_space_plot_path', 'Training Data Distribution')
+                if report_data.get('dataset_debug_info'):
+                    for item in report_data['dataset_debug_info']:
+                        story.append(Paragraph(f"Sample: {item['path']}", h3_style))
+                        add_image(item['image_with_points_path'], 'Image with Points', width=3*inch)
+                        add_image(item['palette_path'], 'Average Color', width=1*inch)
+                        story.append(Spacer(1, 0.1*inch))
+
+        doc.build(story)
+        print(f"ReportLab PDF report saved to {pdf_path}")
+
+    def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None, report_type: str = 'all'):
+        """Generates all report files from the analysis results."""
+        pie_chart_path = self._generate_pie_chart(analysis_results['matched_pixels'], analysis_results['total_pixels'], analysis_results['selected_colors'])
+        color_space_plot_path = self._generate_color_space_plot(analysis_results['lower_limit'], analysis_results['upper_limit'], analysis_results['center_color'])
+        chromaticity_diagram_path = self.plot_hue_saturation_diagram(analysis_results['original_image'], analysis_results['lower_limit'], analysis_results['upper_limit'], "hue_saturation_diagram.png")
+
         reporting_dir = self.get_step_output_dir("reporting")
-        original_input_image_filename = os.path.basename(analysis_results['original_image_path'])
-        original_input_image_dest_path = reporting_dir / original_input_image_filename
-        shutil.copy(analysis_results['original_image_path'], original_input_image_dest_path)
-        original_input_image_path_relative = os.path.relpath(original_input_image_dest_path, self.project_output_dir)
+        orig_img_path = reporting_dir / Path(analysis_results['original_image_path']).name
+        shutil.copy(analysis_results['original_image_path'], orig_img_path)
 
-        analyzed_image_path_relative = os.path.relpath(analysis_results['analyzed_image_path'], self.project_output_dir)
+        logo_path = ""
+        if config.LOGO_PATH.is_file():
+            logo_dest = reporting_dir / config.LOGO_PATH.name
+            shutil.copy(config.LOGO_PATH, logo_dest)
+            logo_path = os.path.relpath(logo_dest, self.project_output_dir)
 
-        logo_filename = os.path.basename(config.LOGO_PATH)
-        logo_dest_path = reporting_dir / logo_filename
-        logo_path_relative = ""
-        try:
-            shutil.copy(config.LOGO_PATH, logo_dest_path)
-            logo_path_relative = os.path.relpath(logo_dest_path, self.project_output_dir)
-        except FileNotFoundError:
-            print(f"[WARNING] Logo file not found at {config.LOGO_PATH}. Report will be generated without a logo.")
-        except Exception as e:
-            print(f"[WARNING] An unexpected error occurred while copying logo: {e}. Report will be generated without a logo.")
-
-        processed_image_path_relative = os.path.relpath(analysis_results['processed_image_path'], self.project_output_dir)
-        mask_path_relative = os.path.relpath(analysis_results['mask_path'], self.project_output_dir)
-        negative_mask_path_relative = os.path.relpath(analysis_results['negative_mask_path'], self.project_output_dir)
-        
-        mask_pre_aggregation_path = analysis_results.get('mask_pre_aggregation_path')
-        mask_pre_aggregation_path_relative = os.path.relpath(mask_pre_aggregation_path, self.project_output_dir) if mask_pre_aggregation_path else None
-        blurred_image_path = analysis_results.get('blurred_image_path')
-        blurred_image_path_relative = os.path.relpath(blurred_image_path, self.project_output_dir) if blurred_image_path else None
-
-        # ... (previous code)
-
-        # --- Symmetry Analysis --- 
-        symmetry_data = None
-        if debug_data and 'symmetry_visualizations' in debug_data:
-            symmetry_data = {
-                'visualizations': debug_data['symmetry_visualizations'],
-                'scores': {k: v for k, v in debug_data.items() if k.startswith('Symmetry:')}
-            }
-
-        # --- Dataset Debug Info ---
-        processed_dataset_info = None
+        processed_dataset_info, dataset_color_space_plot_path = None, None
         if debug_data and 'dataset_debug_info' in debug_data:
             processed_dataset_info = self._process_dataset_debug_info(debug_data['dataset_debug_info'])
+            dataset_color_space_plot_path = self._generate_dataset_color_space_plot(debug_data['dataset_debug_info'], analysis_results['lower_limit'], analysis_results['upper_limit'])
 
         template_vars = {
-            "author": config.AUTHOR,
-            "department": config.DEPARTMENT,
+            "project_name": self.project_name,
+            "author": config.AUTHOR, "department": config.DEPARTMENT,
             "report_title": f"{config.REPORT_TITLE} - {self.project_name}",
-            "logo": logo_path_relative, 
+            "logo": logo_path,
             "today": datetime.datetime.now().strftime("%Y-%m-%d"),
             "part_number": metadata.get("part_number", "N/A"),
             "thickness": metadata.get("thickness", "N/A"),
-            "image_path": original_input_image_path_relative,
-            "analyzed_image_path": analyzed_image_path_relative,
-            "color_space_plot_path": color_space_plot_path_relative,
-            "hsv_diagram_path": chromaticity_diagram_path_relative, # New key for the template
-            "image1_path": processed_image_path_relative,
-            "image2_path": mask_path_relative,
-            "image3_path": pie_chart_path_relative,
-            "negative_mask_path": negative_mask_path_relative,
-            "mask_pre_aggregation_path": mask_pre_aggregation_path_relative,
-            "blurred_image_path": blurred_image_path_relative,
+            "image_path": os.path.relpath(orig_img_path, self.project_output_dir),
+            "analyzed_image_path": os.path.relpath(analysis_results['analyzed_image_path'], self.project_output_dir),
+            "color_space_plot_path": color_space_plot_path,
+            "hsv_diagram_path": chromaticity_diagram_path,
+            "pie_chart_path": pie_chart_path,
             "debug_data": debug_data,
-            "symmetry_data": symmetry_data,
             "dataset_debug_info": processed_dataset_info,
+            "dataset_color_space_plot_path": dataset_color_space_plot_path,
+            "report_type": report_type,
         }
 
-        html_content = self.template.render(template_vars)
-        report_html_path = self.project_output_dir / f"{metadata.get('part_number', 'report')}.html"
-        report_pdf_path = self.project_output_dir / f"{metadata.get('part_number', 'report')}.pdf"
+        self.generate_from_archived_data(template_vars, self.project_output_dir, is_regeneration=False)
 
-        with open(report_html_path, "w") as html_file:
-            html_file.write(html_content)
-        print(f"HTML report saved to {report_html_path}")
+        report_archiver = ReportArchiver(self.project_output_dir)
+        report_archiver.archive_report(template_vars, self.project_output_dir)
 
-        HTML(string=html_content, base_url=str(self.project_output_dir)).write_pdf(report_pdf_path)
-        print(f"PDF report saved to {report_pdf_path}")
+    def generate_from_archived_data(self, report_data: dict, base_dir: Path, is_regeneration: bool = True):
+        """Generates HTML and PDF reports from a data dictionary."""
+        report_type = report_data.get('report_type', 'all')
+        prefix = "regenerated_" if is_regeneration else ""
+        part_number = report_data.get('part_number', 'report')
+
+        # HTML and WeasyPrint PDF Generation
+        if report_type in ['html', 'all']:
+            if HAS_WEASYPRINT and self.template:
+                html_content = self.template.render(report_data)
+                report_html_path = self.project_output_dir / f"{prefix}{part_number}.html"
+                report_pdf_path = self.project_output_dir / f"{prefix}{part_number}.pdf"
+
+                with open(report_html_path, "w", encoding='utf-8') as f: f.write(html_content)
+                print(f"HTML report saved to {report_html_path}")
+
+                HTML(string=html_content, base_url=str(base_dir)).write_pdf(report_pdf_path)
+                print(f"PDF report saved to {report_pdf_path}")
+            elif not HAS_WEASYPRINT:
+                print("[WARNING] jinja2 and/or weasyprint not installed. Skipping HTML/WeasyPrint PDF generation.")
+
+        # ReportLab PDF Generation
+        if report_type in ['reportlab', 'all']:
+            if HAS_REPORTLAB:
+                reportlab_pdf_path = self.project_output_dir / f"{prefix}{part_number}_reportlab.pdf"
+                try:
+                    self._generate_reportlab_pdf(report_data, base_dir, reportlab_pdf_path)
+                except Exception as e:
+                    print(f"[WARNING] Failed to generate ReportLab PDF: {e}")
+            else:
+                print("[WARNING] reportlab not installed. Skipping ReportLab PDF generation.")

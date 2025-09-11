@@ -18,6 +18,11 @@ def main():
     parser.add_argument("--color-alignment", action="store_true", help="Enable color correction.")
     parser.add_argument("--sample-color-checker", type=str, help="Path to the color checker used as a sample for color alignment.")
     parser.add_argument("--symmetry", action="store_true", help="Enable symmetry analysis.")
+    parser.add_argument("--report-type", type=str, default="all", choices=["html", "reportlab", "all"], help="Specify the type of PDF report to generate (default: all).")
+    parser.add_argument("--agg-kernel-size", type=int, default=7, help="Kernel size for the aggregation dilation step.")
+    parser.add_argument("--agg-min-area", type=float, default=0.0005, help="Minimum area ratio for keeping a component during aggregation.")
+    parser.add_argument("--agg-density-thresh", type=float, default=0.5, help="Minimum density of original pixels for an aggregated area to be kept.")
+    parser.add_argument("--blur-kernel", type=int, nargs=2, metavar=('W', 'H'), help="Specify a custom kernel size (width height) for blurring. Both values must be odd.")
 
     args = parser.parse_args()
     
