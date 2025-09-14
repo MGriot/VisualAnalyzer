@@ -64,6 +64,8 @@ def create_project(project_name: str):
         colorchecker_path = dataset_path / "colorchecker"
         aruco_path = dataset_path / "aruco"
         training_path = dataset_path / "training"
+        drawing_path = dataset_path / "drawing"
+        object_path = dataset_path / "object"
         samples_path = project_path / "samples"
         mock_sample_path = samples_path / "test"
         mock_sample_colorchecker_path = mock_sample_path / "colorchecker"
@@ -72,12 +74,16 @@ def create_project(project_name: str):
         colorchecker_path.mkdir(parents=True, exist_ok=True)
         aruco_path.mkdir(exist_ok=True)
         training_path.mkdir(exist_ok=True)
+        drawing_path.mkdir(exist_ok=True)
+        object_path.mkdir(exist_ok=True)
         mock_sample_colorchecker_path.mkdir(parents=True, exist_ok=True)
         mock_sample_sample_path.mkdir(exist_ok=True)
 
         print(f"Created directory: {colorchecker_path}")
         print(f"Created directory: {aruco_path}")
         print(f"Created directory: {training_path}")
+        print(f"Created directory: {drawing_path}")
+        print(f"Created directory: {object_path}")
         print(f"Created directory: {mock_sample_colorchecker_path}")
         print(f"Created directory: {mock_sample_sample_path}")
 

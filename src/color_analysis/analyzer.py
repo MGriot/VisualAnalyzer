@@ -88,7 +88,7 @@ class ColorAnalyzer:
 
         return percentage, matched_pixels
 
-    def process_image(self, image: np.ndarray = None, image_path: str = None, lower_hsv: np.ndarray = None, upper_hsv: np.ndarray = None, output_dir: str = None, debug_mode: bool = False, aggregate_mode: bool = False, alignment_mode: bool = False, drawing_path: str = None, agg_kernel_size: int = 7, agg_min_area: float = 0.0005, agg_density_thresh: float = 0.5) -> dict:
+    def process_image(self, image: np.ndarray = None, image_path: str = None, lower_hsv: np.ndarray = None, upper_hsv: np.ndarray = None, center_hsv: np.ndarray = None, output_dir: str = None, debug_mode: bool = False, aggregate_mode: bool = False, alignment_mode: bool = False, drawing_path: str = None, agg_kernel_size: int = 7, agg_min_area: float = 0.0005, agg_density_thresh: float = 0.5) -> dict:
         """
         Processes a single image for color analysis.
         """
@@ -180,5 +180,11 @@ class ColorAnalyzer:
             "matched_pixels": matched_pixels,
             "total_pixels": total_pixels,
             "mask_pre_aggregation_path": mask_pre_aggregation_path,
-            "alignment_data": alignment_data
+            "alignment_data": alignment_data,
+            "lower_limit": lower_hsv,
+            "upper_limit": upper_hsv,
+            "center_color": center_hsv,
+            "selected_colors": [
+                {"color_name": "Selected Area", "hsv": center_hsv if center_hsv is not None else [0,0,0], "rgb": [0,0,0]}
+            ]
         }

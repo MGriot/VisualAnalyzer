@@ -70,12 +70,23 @@ class ArucoAligner:
 
     def __init__(
         self,
-        aruco_dict=cv2.aruco.DICT_5X5_250,
+        aruco_dict=cv2.aruco.DICT_4X4_50,
         debug_mode: bool = False,
         output_dir: str = "output_aruco",
     ):
         self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(aruco_dict)
         self.aruco_parameters = cv2.aruco.DetectorParameters()
+        
+        # Aggressive tuning for difficult conditions (wrinkled paper, glare)
+        self.aruco_parameters.adaptiveThreshWinSizeMin = 3
+        self.aruco_parameters.adaptiveThreshWinSizeMax = 55 # Wider search range for thresholding window
+        self.aruco_parameters.adaptiveThreshWinSizeStep = 6
+        self.aruco_parameters.adaptiveThreshConstant = 10 # Helps with shadows and non-uniform lighting
+        self.aruco_parameters.polygonalApproxAccuracyRate = 0.08 # More lenient with marker shape
+        self.aruco_parameters.minMarkerPerimeterRate = 0.015 # Adjust for potentially smaller markers in frame
+        self.aruco_parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_CONTOUR # Better for distorted contours
+        self.aruco_parameters.errorCorrectionRate = 0.8 # Higher error correction capability
+
         self.detector = cv2.aruco.ArucoDetector(
             self.aruco_dictionary, self.aruco_parameters
         )
@@ -99,7 +110,7 @@ class ArucoAligner:
                 print(
                     f"[DEBUG] Not enough markers found. Needed 4, but found {len(ids) if ids is not None else 0}."
                 )
-            return None, None, None, None, None
+            return None, None, None, None, None, None, None
 
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
         for c in corners:
@@ -121,9 +132,22 @@ class ArucoAligner:
             marker_id[0]: corner for marker_id, corner in zip(ids, corners)
         }
 
-        # The marker_map is created from a list of IDs in order: [TL, TR, BR, BL]
-        # We can extract this order to correctly assemble our points.
-        ordered_ids = list(marker_map.keys())
+        # Convert marker_map keys from string (from JSON) to int for comparison
+        try:
+            marker_map_int_keys = {int(k): v for k, v in marker_map.items()}
+        except (ValueError, TypeError):
+            if self.debug_mode:
+                print(f"[DEBUG] Error: Keys in 'aruco_marker_map' must be integers. Found: {list(marker_map.keys())}")
+            return None, None, None, None, None
+
+        # We rely on the dictionary insertion order from the JSON file (Python 3.7+).
+        ordered_ids = list(marker_map_int_keys.keys())
+        
+        if len(ordered_ids) < 4:
+            if self.debug_mode:
+                print(f"[DEBUG] Error: 'aruco_marker_map' must contain at least 4 markers. Found: {len(ordered_ids)}")
+            return None, None, None, None, None
+
         tl_id, tr_id, br_id, bl_id = (
             ordered_ids[0],
             ordered_ids[1],
@@ -136,7 +160,7 @@ class ArucoAligner:
             marker_id in detected_markers for marker_id in [tl_id, tr_id, br_id, bl_id]
         ):
             if self.debug_mode:
-                print("[DEBUG] Not all four corner markers were detected.")
+                print(f"[DEBUG] Not all four corner markers were detected. Required: {[tl_id, tr_id, br_id, bl_id]}, Found: {list(detected_markers.keys())}")
             return None, None, None, None, None
 
         # Assemble the 4 source points from the detected markers' corners
@@ -154,10 +178,10 @@ class ArucoAligner:
         # Assemble the 4 destination points from the ideal marker_map
         dest_points = np.array(
             [
-                marker_map[tl_id][0],  # Top-left corner of ideal TL marker
-                marker_map[tr_id][1],  # Top-right corner of ideal TR marker
-                marker_map[br_id][2],  # Bottom-right corner of ideal BR marker
-                marker_map[bl_id][3],  # Bottom-left corner of ideal BL marker
+                marker_map_int_keys[tl_id][0],  # Top-left corner of ideal TL marker
+                marker_map_int_keys[tr_id][1],  # Top-right corner of ideal TR marker
+                marker_map_int_keys[br_id][2],  # Bottom-right corner of ideal BR marker
+                marker_map_int_keys[bl_id][3],  # Bottom-left corner of ideal BL marker
             ],
             dtype=np.float32,
         )
@@ -169,7 +193,7 @@ class ArucoAligner:
         if h is None:
             if self.debug_mode:
                 print("[DEBUG] Homography calculation failed.")
-            return None, None, None, None, None
+            return None, None, None, None, None, None, None
 
         aligned_image = cv2.warpPerspective(image, h, output_size_wh)
 
@@ -181,10 +205,10 @@ class ArucoAligner:
 
         # For compatibility with the wrapper, create a 'used_marker_map'
         used_marker_map = {
-            mid: marker_map[mid] for mid in ordered_ids if mid in detected_markers
+            mid: marker_map_int_keys[mid] for mid in ordered_ids if mid in detected_markers
         }
 
-        return aligned_image, h, corners, ids, used_marker_map
+        return aligned_image, h, corners, ids, used_marker_map, source_points, dest_points
 
     def align_image_to_reference(self, image: np.ndarray, reference_image: np.ndarray):
         """
@@ -278,7 +302,7 @@ class Aligner:
             return aligned_image, alignment_data
 
         elif marker_map and output_size_wh:
-            aligned_image, homography, corners, ids, used_map = (
+            aligned_image, homography, corners, ids, used_map, source_points, dest_points = (
                 self.aruco_aligner.align_image_by_markers(image, marker_map, output_size_wh)
             )
             alignment_data = None
@@ -287,7 +311,9 @@ class Aligner:
                     "homography_matrix": homography.tolist(),
                     "detected_corners": [c.tolist() for c in corners],
                     "detected_ids": ids.flatten().tolist(),
-                    "used_marker_map": {k: v.tolist() for k, v in used_map.items()},
+                    "used_marker_map": used_map,  # Values are already lists from JSON
+                    "source_points": source_points.tolist(),
+                    "dest_points": dest_points.tolist(),
                 }
             return aligned_image, alignment_data
         

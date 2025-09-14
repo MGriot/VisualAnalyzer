@@ -6,16 +6,17 @@ Visual Analyzer is a powerful Python-based tool for advanced image and video ana
 
 ## Features
 
-*   **Project-Based Management:** Organize your work into projects, each with its own configuration, color references, and sample images.
-*   **Advanced Color Correction:** Automatically correct image colors using a color checker. The system detects the color checker using a YOLOv8 model with a fallback to an OpenCV-based method, calculates a color correction matrix, and applies it to the input image or video frames.
+*   **Project-Based Management:** Organize your work into projects, each with its own configuration, color references, and sample images. New projects can be scaffolded with a helper script, which now creates dedicated folders for drawings and object references.
+*   **Advanced Color Correction:** Automatically correct image colors using a color checker. The system detects the color checker, calculates a color correction matrix, and applies it to the input image or video frames.
 *   **Color Zone Analysis:** Identify and quantify areas in an image that match a specific HSV color range. The color range is automatically calculated from a set of user-provided sample images.
-*   **Image Alignment:**
-    *   **Perspective Correction:** Correct perspective distortion using ArUco markers.
-    *   **Object Alignment:** Align objects with a technical drawing for precise analysis.
-*   **Symmetry Analysis:** Analyze the symmetry of an object in an image, including vertical and horizontal reflection, four-quadrant symmetry, rotational symmetry, translational symmetry, and glide-reflection symmetry.
+*   **Two-Step Image Alignment:**
+    *   **Geometrical Alignment:** Corrects perspective distortion using ArUco markers.
+    *   **Object Alignment:** Aligns the primary object in the image to a reference/template image using feature matching.
+*   **Background Removal:** Programmatically remove the background from an image by using a technical drawing as a mask. The masking can be configured to treat white pixels as background in addition to transparent pixels.
+*   **Symmetry Analysis:** Analyze the symmetry of an object in an image, including vertical and horizontal reflection, four-quadrant symmetry, and more.
 *   **Flexible Input:** Analyze single images, video files, or live camera streams.
-*   **Interactive Sample Management:** A GUI is provided to interactively define how sample images are used for color range calculation (full image average or specific points).
-*   **Comprehensive Reporting:** Generate detailed HTML and PDF reports summarizing the analysis results, including statistics, processed images, and visualizations of the color space.
+*   **Interactive Sample Management:** A GUI is provided to interactively define how sample images are used for color range calculation.
+*   **Comprehensive Reporting:** Generate detailed PDF reports summarizing the analysis results, including statistics, processed images, and visualizations.
 *   **Debug Mode:** A debug mode is available for verbose console output and detailed debug reports with intermediate steps and data.
 
 ## Installation
@@ -49,38 +50,38 @@ Visual Analyzer is a powerful Python-based tool for advanced image and video ana
 
 ## Configuration
 
-The Visual Analyzer uses a project-based configuration system. Each project is a directory in the `data/projects` folder and should contain the following files:
+The Visual Analyzer uses a project-based configuration system. Each project is a directory in the `data/projects` folder. Use `python src/create_project.py --name <your_project_name>` to scaffold a new project.
 
 ### `project_config.json`
 
-This file defines the core settings for your project.
+This file defines the core settings for your project. The paths should point to directories within your project folder.
 
 ```json
 {
-    "reference_color_checker_filename": "reference_color_checker.png",
-    "colorchecker_reference_for_project": [
-        "reference_color_checker.png"
-    ],
-    "technical_drawing_filename": "drawing.png",
-    "aruco_marker_map": {
-        "10": [[0, 0], [100, 0], [100, 100], [0, 100]],
-        "20": [[900, 0], [1000, 0], [1000, 100], [900, 100]],
-        "30": [[900, 900], [1000, 900], [1000, 1000], [900, 1000]],
-        "40": [[0, 900], [100, 900], [100, 1000], [0, 1000]]
-    },
-    "aruco_output_size": [1000, 1000]
+    "reference_color_checker_path": "dataset/colorchecker",
+    "training_path": "dataset/training",
+    "object_reference_path": "dataset/object",
+    "technical_drawing_path": "dataset/drawing",
+    "aruco_reference_path": "dataset/aruco",
+    "aruco_marker_map": {},
+    "aruco_output_size": [
+        1000,
+        1000
+    ]
 }
 ```
 
-*   `reference_color_checker_filename`: The filename of the ideal color checker image.
-*   `colorchecker_reference_for_project`: A list of paths to images containing color checkers for calculating the color correction matrix.
-*   `technical_drawing_filename` (Optional): The filename of the technical drawing for alignment.
+*   `reference_color_checker_path`: Path to the directory containing your ideal color checker image.
+*   `training_path`: Path to the directory containing images for calculating the color range.
+*   `object_reference_path` (Optional): Path to the directory containing the reference image for object alignment.
+*   `technical_drawing_path` (Optional): Path to the directory containing the drawing file for background removal.
+*   `aruco_reference_path` (Optional): Path to the directory containing the ArUco reference sheet.
 *   `aruco_marker_map` (Optional): A dictionary mapping ArUco marker IDs to their ideal corner coordinates for perspective correction.
 *   `aruco_output_size` (Optional): The output size of the image after ArUco-based alignment.
 
-### `sample_processing_config.json`
+### `dataset_item_processing_config.json`
 
-This file defines how sample images are processed for color range calculation.
+This file defines how sample images in the `training_path` are processed for color range calculation. You can edit this manually or use the GUI.
 
 ```json
 {
@@ -93,30 +94,22 @@ This file defines how sample images are processed for color range calculation.
             "filename": "sample2.png",
             "method": "points",
             "points": [
-                {"x": 100, "y": 150, "radius": 7},
-                {"x": 200, "y": 250, "radius": 7}
+                {"x": 100, "y": 150, "radius": 7}
             ]
         }
     ]
 }
 ```
 
-*   `image_configs`: A list of configurations for each sample image.
-    *   `filename`: The filename of the sample image.
-    *   `method`: The method for extracting color from the image (`full_average` or `points`).
-    *   `points` (Required for `points` method): A list of points to sample color from.
-
 ## Usage
 
 ### Sample Management
 
-To configure how sample images are processed, use the `sample_manager_main.py` script:
+To configure how sample images are processed, use the `dataset_manager_main.py` script:
 
 ```bash
-python src/sample_manager_main.py --project <project_name>
+python src/dataset_manager_main.py --project <project_name>
 ```
-
-This will open a GUI to interactively select points on the sample images.
 
 ### Running the Analysis
 
@@ -135,10 +128,12 @@ python src/main.py --project <project_name> --image <path_to_image> [options]
 *   `--debug`: Enable debug mode.
 *   `--aggregate`: Enable aggregation of matched pixel areas.
 *   `--blur`: Enable blurring of the input image.
-*   `--alignment`: Enable geometrical alignment.
-*   `--drawing <path>`: Path to a technical drawing for masking.
 *   `--color-alignment`: Enable color correction.
 *   `--symmetry`: Enable symmetry analysis.
+*   `--alignment`: Enable geometrical (ArUco) alignment.
+*   `--object-alignment`: Enable object alignment.
+*   `--apply-mask`: Enable background removal using a drawing.
+*   `--mask-bg-is-white`: When using `--apply-mask`, treat white pixels in the drawing as background.
 
 ### GUI
 
@@ -147,12 +142,3 @@ A graphical user interface is also available to run the analysis. To start the G
 ```bash
 python src/gui_main.py
 ```
-
-## Future Improvements
-
-*   **Pydantic Configuration:** Use Pydantic for configuration validation and management.
-*   **Modular Codebase:** Refactor the `main.py` file to be more modular and easier to maintain.
-*   **Improved Error Handling:** Implement more robust error handling and provide more informative error messages.
-*   **Enhanced GUI:** Improve the main GUI to be more interactive and provide real-time feedback.
-*   **Integrated Symmetry Analysis:** Integrate the symmetry analysis results into the main report.
-*   **Batch Processing:** Implement batch processing of images and videos.

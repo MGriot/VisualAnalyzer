@@ -22,3 +22,4 @@ class ProjectConfig(BaseModel):
     aruco_reference_path: Optional[str] = None
     aruco_marker_map: Optional[Dict[str, List[List[int]]]] = None
     aruco_output_size: Optional[List[int]] = None
+    object_reference_path: Optional[str] = None

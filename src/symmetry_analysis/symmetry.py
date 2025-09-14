@@ -26,8 +26,8 @@ class SymmetryAnalyzer:
 
     def _preprocess_image(self):
         """Prepares the image for analysis (grayscale, even dimensions)."""
-        if len(self.original_image.shape) > 2:
-            self.gray_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGR_GRAY)
+        if len(self.original_image.shape) == 3 and self.original_image.shape[2] in [3, 4]:
+            self.gray_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2GRAY)
         else:
             self.gray_image = self.original_image.copy()
         h, w = self.gray_image.shape

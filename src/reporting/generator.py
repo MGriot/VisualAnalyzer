@@ -166,22 +166,40 @@ class ReportGenerator:
             img = cv.imread(item['path'])
             if img is None: continue
 
+            # Draw points on the image
             img_with_points = img.copy()
             if item.get('method') == 'points' and item.get('points'):
                 for point in item['points']:
-                    cv.circle(img_with_points, (point['x'], point['y']), point['radius'], (0, 0, 255), 2)
-
+                    cv.circle(img_with_points, (point['x'], point['y']), point.get('radius', 7), (0, 0, 255), 2)
+            
             img_path = step_dir / f"dataset_{i}_with_points.png"
             cv.imwrite(str(img_path), img_with_points)
             processed_item['image_with_points_path'] = os.path.relpath(img_path, self.project_output_dir)
 
-            palette = np.full((100, 100, 3), 255, np.uint8)
-            if item.get('avg_color_bgr'):
-                cv.rectangle(palette, (0, 0), (100, 100), tuple(map(int, item['avg_color_bgr'])), -1)
+            # Create color details for each sample color
+            processed_item['color_details'] = []
+            bgr_colors = item.get('bgr_colors', [])
+            hsv_colors = item.get('hsv_colors', [])
+
+            for j, (bgr_color, hsv_color) in enumerate(zip(bgr_colors, hsv_colors)):
+                # Create palette image
+                palette = np.full((100, 100, 3), tuple(map(int, bgr_color)), np.uint8)
+                palette_path = step_dir / f"dataset_{i}_palette_{j}.png"
+                cv.imwrite(str(palette_path), palette)
+
+                # Get RGB version for hex code
+                h, s, v = hsv_color
+                rgb_color = cv.cvtColor(np.uint8([[[h, s, v]]]), cv.COLOR_HSV2RGB)[0][0]
+
+                # Store all details
+                processed_item['color_details'].append({
+                    'palette_path': os.path.relpath(palette_path, self.project_output_dir),
+                    'hsv': f"({int(h)}, {int(s)}, {int(v)})",
+                    'bgr': f"({int(bgr_color[0])}, {int(bgr_color[1])}, {int(bgr_color[2])})",
+                    'rgb': f"({int(rgb_color[0])}, {int(rgb_color[1])}, {int(rgb_color[2])})",
+                    'hex': f"#{int(rgb_color[0]):02x}{int(rgb_color[1]):02x}{int(rgb_color[2]):02x}"
+                })
             
-            palette_path = step_dir / f"dataset_{i}_palette.png"
-            cv.imwrite(str(palette_path), palette)
-            processed_item['palette_path'] = os.path.relpath(palette_path, self.project_output_dir)
             processed_items.append(processed_item)
         return processed_items
 
@@ -281,10 +299,35 @@ class ReportGenerator:
                 add_image('dataset_color_space_plot_path', 'Training Data Distribution')
                 if report_data.get('dataset_debug_info'):
                     for item in report_data['dataset_debug_info']:
-                        story.append(Paragraph(f"Sample: {item['path']}", h3_style))
-                        add_image(item['image_with_points_path'], 'Image with Points', width=3*inch)
-                        add_image(item['palette_path'], 'Average Color', width=1*inch)
-                        story.append(Spacer(1, 0.1*inch))
+                        story.append(Paragraph(f"Sample: {os.path.basename(item['path'])}", h3_style))
+                        add_image(item['image_with_points_path'], 'Image with Sample Points', width=4*inch)
+                        
+                        color_details = item.get('color_details', [])
+                        if color_details:
+                            story.append(Paragraph("Sampled Colors:", body_style))
+                            color_table_data = [['Palette', 'HSV', 'BGR', 'RGB', 'HEX']]
+                            for detail in color_details:
+                                try:
+                                    palette_img = Image(base_dir / detail['palette_path'], width=0.5*inch, height=0.5*inch)
+                                    color_table_data.append([
+                                        palette_img,
+                                        Paragraph(detail['hsv'], code_style),
+                                        Paragraph(detail['bgr'], code_style),
+                                        Paragraph(detail['rgb'], code_style),
+                                        Paragraph(detail['hex'], code_style)
+                                    ])
+                                except Exception:
+                                    color_table_data.append(['(Img Fail)', detail['hsv'], detail['bgr'], detail['rgb'], detail['hex']])
+                            
+                            color_tbl = Table(color_table_data, colWidths=[0.7*inch, 1.5*inch, 1.5*inch, 1.5*inch, 1.3*inch])
+                            color_tbl.setStyle(TableStyle([
+                                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                                ('GRID', (0,0), (-1,-1), 1, colors.black),
+                                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                            ]))
+                            story.append(color_tbl)
+                        story.append(Spacer(1, 0.2*inch))
 
         doc.build(story)
         print(f"ReportLab PDF report saved to {pdf_path}")

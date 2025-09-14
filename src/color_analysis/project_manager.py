@@ -111,6 +111,7 @@ class ProjectManager:
         technical_drawing_rel_path = config_data.technical_drawing_path
         aruco_ref_rel_path = config_data.aruco_reference_path
         training_rel_path = config_data.training_path
+        object_reference_rel_path = config_data.object_reference_path
         
         # New: ArUco alignment configuration
         aruco_marker_map = config_data.aruco_marker_map
@@ -134,10 +135,14 @@ class ProjectManager:
 
         technical_drawing_path = None
         if technical_drawing_rel_path:
-            technical_drawing_path = project_path / technical_drawing_rel_path
-            if not technical_drawing_path.is_file():
-                if debug_mode: print(f"[DEBUG] Warning: Technical drawing '{technical_drawing_rel_path}' not found for project '{project_name}'. Skipping.")
-                technical_drawing_path = None
+            technical_drawing_dir = project_path / technical_drawing_rel_path
+            if technical_drawing_dir.is_dir():
+                for item in technical_drawing_dir.iterdir():
+                    if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg', '.svg']:
+                        technical_drawing_path = item
+                        break
+            if not technical_drawing_path and debug_mode:
+                print(f"[DEBUG] Warning: No drawing image found in '{technical_drawing_dir}'.")
 
         colorchecker_ref_for_project_paths = []
         if colorchecker_ref_for_project_relative:
@@ -159,13 +164,34 @@ class ProjectManager:
             if not aruco_ref_path and debug_mode:
                 print(f"[DEBUG] Warning: No ArUco reference image found in '{aruco_ref_dir}'. Skipping.")
 
+        object_ref_path = None
+        if object_reference_rel_path:
+            object_ref_dir = project_path / object_reference_rel_path
+            if object_ref_dir.is_dir():
+                for item in object_ref_dir.iterdir():
+                    if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                        object_ref_path = item
+                        break
+            if not object_ref_path and debug_mode:
+                print(f"[DEBUG] Warning: No object reference image found in '{object_ref_dir}'. Skipping.")
+
         training_image_configs = []
         if training_rel_path:
             training_path = project_path / training_rel_path
             if training_path.is_dir():
                 for item in training_path.iterdir():
                     if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                        training_image_configs.append({"path": item, "method": "full_average"})
+                        # Check if there's a specific config for this image
+                        img_config = next((cfg for cfg in dataset_item_processing_config.image_configs if cfg.filename == item.name), None)
+                        if img_config:
+                            method = img_config.method
+                            points = img_config.points
+                            if method == "points" and not points:
+                                method = "full_average"
+                            points_as_dicts = [p.model_dump() for p in points] if points else None
+                            training_image_configs.append({"path": item, "method": method, "points": points_as_dicts})
+                        else:
+                            training_image_configs.append({"path": item, "method": "full_average"})
 
         # Dynamically discover dataset images from the 'dataset' folder
         dataset_image_configs = []
@@ -200,6 +226,8 @@ class ProjectManager:
                 print(f"[DEBUG]   Technical Drawing: {technical_drawing_path}")
             if aruco_ref_path:
                 print(f"[DEBUG]   ArUco Reference: {aruco_ref_path}")
+            if object_ref_path:
+                print(f"[DEBUG]   Object Reference: {object_ref_path}")
 
         return {
             "reference_color_checker": ref_color_checker_path,
@@ -208,6 +236,7 @@ class ProjectManager:
             "training_image_configs": training_image_configs,
             "technical_drawing": technical_drawing_path,
             "aruco_reference": aruco_ref_path,
+            "object_reference_path": object_ref_path,
             "aruco_marker_map": aruco_marker_map, # New
             "aruco_output_size": aruco_output_size # New
         }
@@ -286,40 +315,35 @@ class ProjectManager:
             points = img_config.get('points')
             
             try:
+                hsv_colors_for_sample = []
+                bgr_colors_for_sample = []
+
                 if method == "full_average":
                     avg_h, avg_s, avg_v = self.dataset_item_processor.calculate_hsv_from_full_image(dataset_item_file_path)
+                    hsv_colors_for_sample.append((avg_h, avg_s, avg_v))
                     all_hsv_colors.append((avg_h, avg_s, avg_v))
-                    avg_hsv_for_debug = np.array([[[avg_h, avg_s, avg_v]]], dtype=np.uint8)
-                    avg_bgr = cv2.cvtColor(avg_hsv_for_debug, cv2.COLOR_HSV2BGR)[0][0]
-                    dataset_debug_info.append({
-                        'path': str(dataset_item_file_path),
-                        'method': method,
-                        'points': None,
-                        'avg_color_bgr': avg_bgr.tolist(),
-                        'hsv_colors': [(avg_h, avg_s, avg_v)]
-                    })
                     if debug_mode: print(f"[DEBUG]   Processed {dataset_item_file_path.name} using full_average.")
-                
+
                 elif method == "points":
                     if not points: raise ValueError(f"Points not specified for {dataset_item_file_path.name} with 'points' method.")
-                    
                     point_colors_hsv = self.dataset_item_processor.calculate_hsv_from_points(dataset_item_file_path, points)
+                    hsv_colors_for_sample.extend(point_colors_hsv)
                     all_hsv_colors.extend(point_colors_hsv)
-                    
-                    # For debug, we'll show the average of the points for that image
-                    avg_h = np.mean([c[0] for c in point_colors_hsv])
-                    avg_s = np.mean([c[1] for c in point_colors_hsv])
-                    avg_v = np.mean([c[2] for c in point_colors_hsv])
-                    avg_hsv_for_debug = np.array([[[avg_h, avg_s, avg_v]]], dtype=np.uint8)
-                    avg_bgr = cv2.cvtColor(avg_hsv_for_debug, cv2.COLOR_HSV2BGR)[0][0]
-                    dataset_debug_info.append({
-                        'path': str(dataset_item_file_path),
-                        'method': method,
-                        'points': points,
-                        'avg_color_bgr': avg_bgr.tolist(),
-                        'hsv_colors': point_colors_hsv
-                    })
                     if debug_mode: print(f"[DEBUG]   Processed {dataset_item_file_path.name} using points method with {len(points)} points.")
+
+                # Common logic for debug info
+                for hsv_color in hsv_colors_for_sample:
+                    hsv_for_debug = np.array([[list(hsv_color)]], dtype=np.uint8)
+                    bgr_color = cv2.cvtColor(hsv_for_debug, cv2.COLOR_HSV2BGR)[0][0]
+                    bgr_colors_for_sample.append(bgr_color.tolist())
+
+                dataset_debug_info.append({
+                    'path': str(dataset_item_file_path),
+                    'method': method,
+                    'points': points,
+                    'bgr_colors': bgr_colors_for_sample,
+                    'hsv_colors': hsv_colors_for_sample
+                })
 
             except Exception as e:
                 if debug_mode: print(f"[DEBUG] Warning: Error processing dataset image {dataset_item_file_path.name}: {e}. Skipping.")

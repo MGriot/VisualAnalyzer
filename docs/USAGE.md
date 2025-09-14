@@ -26,10 +26,6 @@ The `main.py` script provides a variety of command-line arguments to customize t
 
 *   `--blur-kernel <W H>`: (Optional) Specify a custom kernel size (width height) for blurring. Both values must be odd integers. Overrides the default adaptive kernel.
 
-*   `--alignment`: Enable geometrical alignment. This feature uses ArUco markers to correct perspective distortion.
-
-*   `--drawing <path>`: Path to a technical drawing for masking. The drawing should be a black and white image where the white area represents the object of interest.
-
 *   `--color-alignment`: Enable color correction. This feature uses a color checker to correct the colors of the input image.
 
 *   `--symmetry`: Enable symmetry analysis. This will analyze the symmetry of the object in the image and include the results in the debug report.
@@ -41,6 +37,18 @@ The `main.py` script provides a variety of command-line arguments to customize t
 *   `--agg-min-area <float>`: (Optional) Sets the minimum area ratio for keeping a detected color region during aggregation. Default is 0.0005.
 
 *   `--agg-density-thresh <float>`: (Optional) Sets the minimum density (0.0-1.0) of original pixels for an aggregated area to be kept. Prevents over-aggregation. Default is 0.5.
+
+### Alignment and Masking Arguments
+
+*   `--alignment`: Enable geometrical alignment. This feature uses ArUco markers to correct perspective distortion based on the `aruco_reference_path` in the project config.
+
+*   `--object-alignment`: Enable object alignment. This second alignment step aligns the object to a template image using feature matching. It requires the `object_reference_path` to be set in the project config.
+
+*   `--apply-mask`: Enable background removal. This step uses a drawing to create a mask and remove the background from the image. It requires the `technical_drawing_path` to be set in the project config.
+
+*   `--mask-bg-is-white`: A modifier for `--apply-mask`. If specified, any pure white pixels in the drawing file will also be treated as background and removed.
+
+*   `--drawing <path>`: **(Legacy)** Path to a technical drawing for masking. The `--apply-mask` feature, which uses the project's configured `technical_drawing_path`, is now the recommended method for masking.
 
 ## Report Outputs and Archiving
 
@@ -60,7 +68,7 @@ You can regenerate any report from its archive file using the `regenerate_report
 **Usage:**
 ```bash
 # Activate your virtual environment first
-.venv/Scripts/activate.bat
+.venv\Scripts\activate.bat
 
 # Run the regeneration script
 python regenerate_report.py --archive "output/<project_name>/<sample_name>/archives/<archive_name>.zip"
@@ -68,34 +76,16 @@ python regenerate_report.py --archive "output/<project_name>/<sample_name>/archi
 
 ## Debug Reports
 
-When you run the analysis with the `--debug` flag, the Visual Analyzer generates a detailed debug report in HTML and PDF format. The debug report contains the following sections:
+When you run the analysis with the `--debug` flag, the Visual Analyzer generates a detailed debug report. The debug report contains the following sections:
 
 *   **Project Information:** Information about the project, including the project name and the HSV color range used for the analysis.
 
-*   **Analysis Settings:** The settings used for the analysis, such as whether color alignment, geometrical alignment, and blurring were enabled.
+*   **Analysis Settings:** The settings used for the analysis, such as which alignment, masking, and blurring options were enabled.
 
 *   **Analysis Results:** The results of the analysis, including the number of matched pixels, the total number of pixels, and the percentage of matched pixels.
 
-*   **Image Pipeline:** A visual representation of the image processing pipeline, showing the intermediate images at each step of the analysis.
+*   **Image Pipeline:** A visual representation of the image processing pipeline, showing the intermediate images at each step of the analysis. This is crucial for debugging the new alignment and masking steps.
 
 *   **Symmetry Analysis Results:** The results of the symmetry analysis, including the symmetry scores for each type of symmetry and visualizations of the symmetry axes.
 
 *   **Dataset Color Space Definition:** A detailed breakdown of how the color space was derived from the training images, including a scatter plot showing the distribution of training colors.
-
-## Symmetry Analysis
-
-The symmetry analysis feature allows you to analyze the symmetry of an object in an image. To use this feature, you need to enable it with the `--symmetry` flag.
-
-The symmetry analysis is performed by the `SymmetryAnalyzer` class in the `src/symmetry_analysis/symmetry.py` file. This class provides methods for analyzing the following types of symmetry:
-
-*   **Vertical and Horizontal Reflection:** The symmetry of the object across its vertical and horizontal axes.
-
-*   **Four-Quadrant Symmetry:** The symmetry of the object across its four quadrants.
-
-*   **Rotational Symmetry:** The symmetry of the object when it is rotated by a certain angle.
-
-*   **Translational Symmetry:** The symmetry of the object when it is translated by a certain distance.
-
-*   **Glide-Reflection Symmetry:** The symmetry of the object when it is reflected and then translated.
-
-The results of the symmetry analysis are included in the debug report. The report shows the symmetry score for each type of symmetry, as well as visualizations of the symmetry axes.
