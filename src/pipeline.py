@@ -308,64 +308,74 @@ def process_image(
         # --- 4. MASKING (BACKGROUND REMOVAL) ---
         if args.apply_mask:
             step_dir = report_generator.get_step_output_dir("masking")
-            # This step uses the technical_drawing_path from the project config
             project_files = project_manager.get_project_file_paths(
                 args.project, debug_mode=args.debug
             )
-            technical_drawing_path = project_files.get("technical_drawing")
+            
+            technical_drawing_paths = {
+                "1": project_files.get("technical_drawing_layer_1"),
+                "2": project_files.get("technical_drawing_layer_2"),
+                "3": project_files.get("technical_drawing_layer_3"),
+            }
 
             if args.debug:
                 debug_data_for_report["--- Masking ---"] = ""
                 debug_data_for_report["Masking Enabled"] = True
+                debug_data_for_report["Masking Order"] = args.masking_order
                 debug_data_for_report["Treat White as BG"] = args.mask_bg_is_white
 
-            if technical_drawing_path and os.path.exists(technical_drawing_path):
-                if args.debug:
-                    debug_data_for_report["Masking Drawing Path"] = os.path.basename(str(technical_drawing_path))
+            masking_order = args.masking_order.split('-')
+            mask_creator = MaskCreator()
 
-                mask_creator = MaskCreator()
-                mask = mask_creator.create_mask(
-                    str(technical_drawing_path), treat_white_as_bg=args.mask_bg_is_white
-                )
-
-                if mask is not None:
+            for i, layer_index in enumerate(masking_order):
+                technical_drawing_path = technical_drawing_paths.get(layer_index)
+                
+                if technical_drawing_path and os.path.exists(technical_drawing_path):
                     if args.debug:
-                        mask_path = os.path.join(step_dir, "generated_mask.png")
-                        save_image(mask_path, mask)
-                        debug_image_pipeline.append(
-                            {
-                                "title": f"{pipeline_step_counter}. Generated Mask",
-                                "path": os.path.relpath(
-                                    mask_path, report_generator.project_output_dir
-                                ),
-                            }
-                        )
-                        pipeline_step_counter += 1
+                        debug_data_for_report[f"Masking Drawing Path (Layer {layer_index})"] = os.path.basename(str(technical_drawing_path))
 
-                    image_to_be_processed = mask_creator.apply_mask(
-                        image_to_be_processed, mask
+                    mask = mask_creator.create_mask(
+                        str(technical_drawing_path), treat_white_as_bg=args.mask_bg_is_white
                     )
 
-                    if args.debug:
-                        masked_image_path = os.path.join(step_dir, "masked_image.png")
-                        save_image(masked_image_path, image_to_be_processed)
-                        debug_image_pipeline.append(
-                            {
-                                "title": f"{pipeline_step_counter}. After Masking",
-                                "path": os.path.relpath(
-                                    masked_image_path, report_generator.project_output_dir
-                                ),
-                            }
+                    if mask is not None:
+                        if args.debug:
+                            mask_path = os.path.join(step_dir, f"generated_mask_layer_{layer_index}.png")
+                            save_image(mask_path, mask)
+                            debug_image_pipeline.append(
+                                {
+                                    "title": f"{pipeline_step_counter}. Generated Mask (Layer {layer_index})",
+                                    "path": os.path.relpath(
+                                        mask_path, report_generator.project_output_dir
+                                    ),
+                                }
+                            )
+                            pipeline_step_counter += 1
+
+                        image_to_be_processed = mask_creator.apply_mask(
+                            image_to_be_processed, mask
                         )
-                        pipeline_step_counter += 1
+
+                        if args.debug:
+                            masked_image_path = os.path.join(step_dir, f"masked_image_layer_{layer_index}.png")
+                            save_image(masked_image_path, image_to_be_processed)
+                            debug_image_pipeline.append(
+                                {
+                                    "title": f"{pipeline_step_counter}. After Masking (Layer {layer_index})",
+                                    "path": os.path.relpath(
+                                        masked_image_path, report_generator.project_output_dir
+                                    ),
+                                }
+                            )
+                            pipeline_step_counter += 1
+                    else:
+                        print(f"[WARNING] Could not create mask from {technical_drawing_path}")
+                        if args.debug:
+                            debug_data_for_report[f"Masking Status (Layer {layer_index})"] = "Failed (Mask creation error)"
                 else:
-                    print(f"[WARNING] Could not create mask from {technical_drawing_path}")
+                    print(f"[WARNING] --apply-mask enabled, but no valid technical_drawing_path for layer {layer_index} found in project config.")
                     if args.debug:
-                        debug_data_for_report["Masking Status"] = "Failed (Mask creation error)"
-            else:
-                print("[WARNING] --apply-mask enabled, but no valid technical_drawing_path found in project config.")
-                if args.debug:
-                    debug_data_for_report["Masking Status"] = "Skipped (No drawing found)"
+                        debug_data_for_report[f"Masking Status (Layer {layer_index})"] = "Skipped (No drawing found)"
 
         # --- 5. BLUR ---
         blurred_kernel_size = None
@@ -452,22 +462,13 @@ def process_image(
         if args.symmetry:
             step_dir = report_generator.get_step_output_dir("symmetry_analysis")
             try:
-                mask_path_for_symmetry = analysis_results.get("mask_path")
+                mask_for_symmetry = analysis_results.get("mask")
 
-                if mask_path_for_symmetry and os.path.exists(mask_path_for_symmetry):
-                    image_for_symmetry, _ = load_image(
-                        mask_path_for_symmetry, handle_transparency=False
-                    )
-
-                    if image_for_symmetry is None:
-                        print(
-                            f"[WARNING] Failed to load mask for symmetry analysis from {mask_path_for_symmetry}. Skipping."
-                        )
-                    else:
-                        symmetry_analyzer = SymmetryAnalyzer(image_for_symmetry)
-                        symmetry_analyzer.analyze_all()
-                        symmetry_results = symmetry_analyzer.results
-                        print("[DEBUG] Symmetry analysis completed.")
+                if mask_for_symmetry is not None:
+                    symmetry_analyzer = SymmetryAnalyzer(mask_for_symmetry)
+                    symmetry_analyzer.analyze_all()
+                    symmetry_results = symmetry_analyzer.results
+                    print("[DEBUG] Symmetry analysis completed.")
                 else:
                     print(
                         "[WARNING] Final color mask not found. Skipping symmetry analysis."

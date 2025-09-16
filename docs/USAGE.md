@@ -48,7 +48,48 @@ The `main.py` script provides a variety of command-line arguments to customize t
 
 *   `--mask-bg-is-white`: A modifier for `--apply-mask`. If specified, any pure white pixels in the drawing file will also be treated as background and removed.
 
-*   `--drawing <path>`: **(Legacy)** Path to a technical drawing for masking. The `--apply-mask` feature, which uses the project's configured `technical_drawing_path`, is now the recommended method for masking.
+*   `--masking-order <order>`: Specify the order of masking layers (e.g., '1-2-3', '3-1-2'). Default is '1-2-3'.
+
+## GUI Usage
+
+To launch the Graphical User Interface (GUI), run `gui.py`. You can optionally add `--debug` to show all advanced options:
+
+```bash
+python src/gui.py
+```
+or for debug layout:
+```bash
+python src/gui.py --debug
+```
+
+The GUI provides an intuitive way to configure and run the analysis. Here's a breakdown of its elements:
+
+*   **Project Section:**
+    *   **Project Name:** Select your project from the dropdown list. This corresponds to the `--project` CLI argument.
+
+*   **Files Section:**
+    *   **Select Image:** Click this button to browse and select the image file you want to analyze. This corresponds to the `--image` CLI argument.
+    *   **Select Color Checker:** Click this button to browse and select the color checker image file. This corresponds to the `--sample-color-checker` CLI argument.
+
+*   **Analysis Steps & Options Section (visible in debug mode):** This section contains checkboxes for enabling/disabling various analysis steps, ordered by their typical execution flow in the pipeline. Some steps also have associated input fields for specific parameters.
+    *   **Color Alignment:** Enables color correction (`--color-alignment`).
+    *   **Geometrical Alignment (ArUco):** Enables ArUco-based alignment (`--alignment`).
+    *   **Object Alignment:** Enables feature-based object alignment (`--object-alignment`).
+    *   **Apply Mask:** Enables background removal (`--apply-mask`).
+        *   **Treat White as BG:** Modifier for `--apply-mask` (`--mask-bg-is-white`).
+        *   **Masking Order (e.g., 1-2-3):** Specifies the order of technical drawing layers to apply (`--masking-order`).
+    *   **Blur Image:** Enables image blurring (`--blur`).
+        *   **Blur Kernel (W H, odd):** Custom kernel size for blurring (`--blur-kernel`).
+    *   **Aggregate Matched Pixels:** Enables aggregation of color regions (`--aggregate`).
+        *   **Agg Kernel Size:** Kernel size for aggregation dilation (`--agg-kernel-size`).
+        *   **Agg Min Area:** Minimum area ratio for aggregated components (`--agg-min-area`).
+        *   **Agg Density Thresh:** Minimum density for aggregated areas (`--agg-density-thresh`).
+    *   **Symmetry Analysis:** Enables symmetry calculation (`--symmetry`).
+
+*   **Report Section (visible in debug mode):**
+    *   **Report Type:** Select the desired report format from the dropdown. This corresponds to the `--report-type` CLI argument.
+
+*   **Run Analysis Button:** Click this button to start the analysis. A dialog will prompt you to choose between running in **Debug Mode** (`--debug`) or **Normal Mode**. The GUI will execute the underlying CLI command and display a success or error message.
 
 ## Report Outputs and Archiving
 

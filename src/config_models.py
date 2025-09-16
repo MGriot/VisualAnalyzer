@@ -18,7 +18,9 @@ class ProjectConfig(BaseModel):
     reference_color_checker_path: str
     training_path: str
     colorchecker_reference_for_project: Optional[List[str]] = None
-    technical_drawing_path: Optional[str] = None
+    technical_drawing_path_layer_1: Optional[str] = None
+    technical_drawing_path_layer_2: Optional[str] = None
+    technical_drawing_path_layer_3: Optional[str] = None
     aruco_reference_path: Optional[str] = None
     aruco_marker_map: Optional[Dict[str, List[List[int]]]] = None
     aruco_output_size: Optional[List[int]] = None

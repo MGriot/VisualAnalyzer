@@ -26,13 +26,20 @@ class SymmetryAnalyzer:
 
     def _preprocess_image(self):
         """Prepares the image for analysis (grayscale, even dimensions)."""
-        if len(self.original_image.shape) == 3 and self.original_image.shape[2] in [3, 4]:
+        if len(self.original_image.shape) == 3 and self.original_image.shape[2] == 4:
+            self.gray_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGRA2GRAY)
+            self.mask = self.original_image[:, :, 3]
+        elif len(self.original_image.shape) == 3:
             self.gray_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2GRAY)
+            self.mask = np.ones_like(self.gray_image) * 255
         else:
             self.gray_image = self.original_image.copy()
+            self.mask = np.ones_like(self.gray_image) * 255
+
         h, w = self.gray_image.shape
         h, w = h - (h % 2), w - (w % 2)
         self.processed_image = self.gray_image[0:h, 0:w]
+        self.mask = self.mask[0:h, 0:w]
 
     def _calculate_similarity(self, part1, part2, mask=None):
         """
@@ -155,8 +162,12 @@ class SymmetryAnalyzer:
         center = (w // 2, h // 2)
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
         rotated_img = cv2.warpAffine(self.processed_image, M, (w, h))
-        mask = cv2.warpAffine(np.ones_like(self.processed_image) * 255, M, (w, h))
-        score = self._calculate_similarity(self.processed_image, rotated_img, mask=mask)
+        rotated_mask = cv2.warpAffine(self.mask, M, (w, h))
+        
+        # Combine the original mask with the rotated mask to get the intersection
+        intersection_mask = cv2.bitwise_and(self.mask, rotated_mask)
+        
+        score = self._calculate_similarity(self.processed_image, rotated_img, mask=intersection_mask)
         self.results[f'rotational_{angle}deg'] = {'score': score, 'chunks': {'original': self.processed_image, 'rotated': rotated_img}}
 
     # ------------------------------------------------------------------------------------

@@ -108,7 +108,9 @@ class ProjectManager:
 
         ref_color_checker_rel_path = config_data.reference_color_checker_path
         colorchecker_ref_for_project_relative = config_data.colorchecker_reference_for_project
-        technical_drawing_rel_path = config_data.technical_drawing_path
+        technical_drawing_rel_path_layer_1 = config_data.technical_drawing_path_layer_1
+        technical_drawing_rel_path_layer_2 = config_data.technical_drawing_path_layer_2
+        technical_drawing_rel_path_layer_3 = config_data.technical_drawing_path_layer_3
         aruco_ref_rel_path = config_data.aruco_reference_path
         training_rel_path = config_data.training_path
         object_reference_rel_path = config_data.object_reference_path
@@ -120,29 +122,24 @@ class ProjectManager:
         if not ref_color_checker_rel_path:
             raise ValueError(f"'reference_color_checker_path' not specified in project_config.json for project '{project_name}'.")
 
-        ref_color_checker_dir = project_path / ref_color_checker_rel_path
-        if not ref_color_checker_dir.is_dir():
-            raise FileNotFoundError(f"Reference color checker directory '{ref_color_checker_rel_path}' not found for project '{project_name}'.")
+        ref_color_checker_path = project_path / ref_color_checker_rel_path if ref_color_checker_rel_path else None
+        if ref_color_checker_path and not ref_color_checker_path.is_file():
+            raise FileNotFoundError(f"Reference color checker file not found at '{ref_color_checker_path}'.")
 
-        ref_color_checker_path = None
-        for item in ref_color_checker_dir.iterdir():
-            if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                ref_color_checker_path = item
-                break
-        
-        if not ref_color_checker_path:
-            raise FileNotFoundError(f"No reference color checker image found in '{ref_color_checker_dir}'.")
+        technical_drawing_path_layer_1 = project_path / technical_drawing_rel_path_layer_1 if technical_drawing_rel_path_layer_1 else None
+        if technical_drawing_path_layer_1 and not technical_drawing_path_layer_1.is_file():
+            if debug_mode: print(f"[DEBUG] Warning: Technical drawing layer 1 file not found at '{technical_drawing_path_layer_1}'.")
+            technical_drawing_path_layer_1 = None
 
-        technical_drawing_path = None
-        if technical_drawing_rel_path:
-            technical_drawing_dir = project_path / technical_drawing_rel_path
-            if technical_drawing_dir.is_dir():
-                for item in technical_drawing_dir.iterdir():
-                    if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg', '.svg']:
-                        technical_drawing_path = item
-                        break
-            if not technical_drawing_path and debug_mode:
-                print(f"[DEBUG] Warning: No drawing image found in '{technical_drawing_dir}'.")
+        technical_drawing_path_layer_2 = project_path / technical_drawing_rel_path_layer_2 if technical_drawing_rel_path_layer_2 else None
+        if technical_drawing_path_layer_2 and not technical_drawing_path_layer_2.is_file():
+            if debug_mode: print(f"[DEBUG] Warning: Technical drawing layer 2 file not found at '{technical_drawing_path_layer_2}'.")
+            technical_drawing_path_layer_2 = None
+
+        technical_drawing_path_layer_3 = project_path / technical_drawing_rel_path_layer_3 if technical_drawing_rel_path_layer_3 else None
+        if technical_drawing_path_layer_3 and not technical_drawing_path_layer_3.is_file():
+            if debug_mode: print(f"[DEBUG] Warning: Technical drawing layer 3 file not found at '{technical_drawing_path_layer_3}'.")
+            technical_drawing_path_layer_3 = None
 
         colorchecker_ref_for_project_paths = []
         if colorchecker_ref_for_project_relative:
@@ -153,27 +150,21 @@ class ProjectManager:
                 else:
                     if debug_mode: print(f"[DEBUG] Warning: Color checker reference image '{rel_path}' not found for project '{project_name}'. Skipping.")
 
-        aruco_ref_path = None
-        if aruco_ref_rel_path:
-            aruco_ref_dir = project_path / aruco_ref_rel_path
-            if aruco_ref_dir.is_dir():
-                for item in aruco_ref_dir.iterdir():
-                    if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                        aruco_ref_path = item
-                        break
-            if not aruco_ref_path and debug_mode:
-                print(f"[DEBUG] Warning: No ArUco reference image found in '{aruco_ref_dir}'. Skipping.")
+        aruco_ref_path = project_path / aruco_ref_rel_path if aruco_ref_rel_path else None
+        if aruco_ref_path and not aruco_ref_path.is_file():
+            if debug_mode: print(f"[DEBUG] Warning: ArUco reference file not found at '{aruco_ref_path}'.")
+            aruco_ref_path = None
 
-        object_ref_path = None
-        if object_reference_rel_path:
-            object_ref_dir = project_path / object_reference_rel_path
-            if object_ref_dir.is_dir():
-                for item in object_ref_dir.iterdir():
-                    if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                        object_ref_path = item
-                        break
-            if not object_ref_path and debug_mode:
-                print(f"[DEBUG] Warning: No object reference image found in '{object_ref_dir}'. Skipping.")
+        object_ref_path = project_path / object_reference_rel_path if object_reference_rel_path else None
+        if object_ref_path and not object_ref_path.is_file():
+            if debug_mode: print(f"[DEBUG] Warning: Object reference file not found at '{object_ref_path}'.")
+            object_ref_path = None
+        if object_ref_path and not object_ref_path.is_file():
+            if debug_mode: print(f"[DEBUG] Warning: Object reference file not found at '{object_ref_path}'.")
+            object_ref_path = None
+        if object_ref_path and not object_ref_path.is_file():
+            if debug_mode: print(f"[DEBUG] Warning: Object reference file not found at '{object_ref_path}'.")
+            object_ref_path = None
 
         training_image_configs = []
         if training_rel_path:
@@ -222,8 +213,12 @@ class ProjectManager:
             print(f"[DEBUG]   Reference Color Checker: {ref_color_checker_path}")
             print(f"[DEBUG]   Color Checker Refs for Project: {colorchecker_ref_for_project_paths}")
             print(f"[DEBUG]   Dataset Image Configurations: {dataset_image_configs}")
-            if technical_drawing_path:
-                print(f"[DEBUG]   Technical Drawing: {technical_drawing_path}")
+            if technical_drawing_path_layer_1:
+                print(f"[DEBUG]   Technical Drawing Layer 1: {technical_drawing_path_layer_1}")
+            if technical_drawing_path_layer_2:
+                print(f"[DEBUG]   Technical Drawing Layer 2: {technical_drawing_path_layer_2}")
+            if technical_drawing_path_layer_3:
+                print(f"[DEBUG]   Technical Drawing Layer 3: {technical_drawing_path_layer_3}")
             if aruco_ref_path:
                 print(f"[DEBUG]   ArUco Reference: {aruco_ref_path}")
             if object_ref_path:
@@ -234,7 +229,9 @@ class ProjectManager:
             "colorchecker_reference_for_project": colorchecker_ref_for_project_paths,
             "dataset_image_configs": dataset_image_configs,
             "training_image_configs": training_image_configs,
-            "technical_drawing": technical_drawing_path,
+            "technical_drawing_layer_1": technical_drawing_path_layer_1,
+            "technical_drawing_layer_2": technical_drawing_path_layer_2,
+            "technical_drawing_layer_3": technical_drawing_path_layer_3,
             "aruco_reference": aruco_ref_path,
             "object_reference_path": object_ref_path,
             "aruco_marker_map": aruco_marker_map, # New

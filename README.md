@@ -16,6 +16,7 @@ Visual Analyzer is a powerful Python-based tool for advanced image and video ana
 *   **Symmetry Analysis:** Analyze the symmetry of an object in an image, including vertical and horizontal reflection, four-quadrant symmetry, and more.
 *   **Flexible Input:** Analyze single images, video files, or live camera streams.
 *   **Interactive Sample Management:** A GUI is provided to interactively define how sample images are used for color range calculation.
+*   **Enhanced GUI:** The main application now features a comprehensive GUI for easy configuration of all analysis parameters, including project selection, file inputs, and advanced options.
 *   **Comprehensive Reporting:** Generate detailed PDF reports summarizing the analysis results, including statistics, processed images, and visualizations.
 *   **Debug Mode:** A debug mode is available for verbose console output and detailed debug reports with intermediate steps and data.
 
@@ -54,15 +55,17 @@ The Visual Analyzer uses a project-based configuration system. Each project is a
 
 ### `project_config.json`
 
-This file defines the core settings for your project. The paths should point to directories within your project folder.
+This file defines the core settings for your project. Paths are now direct file paths relative to the project root.
 
 ```json
 {
-    "reference_color_checker_path": "dataset/colorchecker",
+    "reference_color_checker_path": "dataset/colorchecker/colorchecker.png",
     "training_path": "dataset/training",
-    "object_reference_path": "dataset/object",
-    "technical_drawing_path": "dataset/drawing",
-    "aruco_reference_path": "dataset/aruco",
+    "object_reference_path": "dataset/object/object.png",
+    "technical_drawing_path_layer_1": "dataset/drawing/image.png",
+    "technical_drawing_path_layer_2": "dataset/drawing/image1.png",
+    "technical_drawing_path_layer_3": "dataset/drawing/image2.png",
+    "aruco_reference_path": "dataset/aruco/aruco.png",
     "aruco_marker_map": {},
     "aruco_output_size": [
         1000,
@@ -71,11 +74,13 @@ This file defines the core settings for your project. The paths should point to 
 }
 ```
 
-*   `reference_color_checker_path`: Path to the directory containing your ideal color checker image.
+*   `reference_color_checker_path`: Path to the ideal color checker image file.
 *   `training_path`: Path to the directory containing images for calculating the color range.
-*   `object_reference_path` (Optional): Path to the directory containing the reference image for object alignment.
-*   `technical_drawing_path` (Optional): Path to the directory containing the drawing file for background removal.
-*   `aruco_reference_path` (Optional): Path to the directory containing the ArUco reference sheet.
+*   `object_reference_path` (Optional): Path to the reference image file for object alignment.
+*   `technical_drawing_path_layer_1` (Optional): Path to the first technical drawing file for background removal.
+*   `technical_drawing_path_layer_2` (Optional): Path to the second technical drawing file for background removal.
+*   `technical_drawing_path_layer_3` (Optional): Path to the third technical drawing file for background removal.
+*   `aruco_reference_path` (Optional): Path to the ArUco reference sheet image file.
 *   `aruco_marker_map` (Optional): A dictionary mapping ArUco marker IDs to their ideal corner coordinates for perspective correction.
 *   `aruco_output_size` (Optional): The output size of the image after ArUco-based alignment.
 
@@ -103,6 +108,25 @@ This file defines how sample images in the `training_path` are processed for col
 
 ## Usage
 
+### Launching the Application
+
+The application can be launched either via a Graphical User Interface (GUI) or through the Command-Line Interface (CLI).
+
+*   **GUI:** To start the GUI, run `gui.py`. You can optionally add `--debug` to show all advanced options.
+    ```bash
+    python src/gui.py
+    ```
+    or for debug layout:
+    ```bash
+    python src/gui.py --debug
+    ```
+    The GUI provides an intuitive way to select projects, input files, and configure analysis options.
+
+*   **CLI:** To run the analysis directly from the command line, provide the necessary arguments to `main.py`:
+    ```bash
+    python src/main.py --project <project_name> --image <path_to_image> [options]
+    ```
+
 ### Sample Management
 
 To configure how sample images are processed, use the `dataset_manager_main.py` script:
@@ -111,15 +135,7 @@ To configure how sample images are processed, use the `dataset_manager_main.py` 
 python src/dataset_manager_main.py --project <project_name>
 ```
 
-### Running the Analysis
-
-To run the analysis, use the `main.py` script:
-
-```bash
-python src/main.py --project <project_name> --image <path_to_image> [options]
-```
-
-**Command-Line Options:**
+### Command-Line Options:
 
 *   `--project <project_name>`: The name of the project to use.
 *   `--image <path>`: Path to a single image file for analysis.
@@ -134,11 +150,9 @@ python src/main.py --project <project_name> --image <path_to_image> [options]
 *   `--object-alignment`: Enable object alignment.
 *   `--apply-mask`: Enable background removal using a drawing.
 *   `--mask-bg-is-white`: When using `--apply-mask`, treat white pixels in the drawing as background.
-
-### GUI
-
-A graphical user interface is also available to run the analysis. To start the GUI, run:
-
-```bash
-python src/gui_main.py
-```
+*   `--masking-order <order>`: Specify the order of masking layers (e.g., '1-2-3', '3-1-2'). Default is '1-2-3'.
+*   `--report-type <type>`: Specify the type of PDF report to generate ('html', 'reportlab', 'all'). Default is 'all'.
+*   `--agg-kernel-size <size>`: Kernel size for the aggregation dilation step (default: 7).
+*   `--agg-min-area <ratio>`: Minimum area ratio for keeping a component during aggregation (default: 0.0005).
+*   `--agg-density-thresh <threshold>`: Minimum density of original pixels for an aggregated area to be kept (default: 0.5).
+*   `--blur-kernel <W> <H>`: Specify a custom kernel size (width height) for blurring. Both values must be odd.

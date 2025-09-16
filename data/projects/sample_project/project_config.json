@@ -1,5 +1,14 @@
 {
-    "reference_color_checker_path": "colorchecker/reference_color_checker.png",
-    "aruco_reference_path": null,
-    "technical_drawing_path": null
+    "reference_color_checker_path": "dataset/colorchecker",
+    "training_path": "dataset/training",
+    "object_reference_path": "dataset/object",
+    "technical_drawing_path_layer_1": "dataset/drawing/image.png",
+    "technical_drawing_path_layer_2": "dataset/drawing/image1.png",
+    "technical_drawing_path_layer_3": "dataset/drawing/image2.png",
+    "aruco_reference_path": "dataset/aruco",
+    "aruco_marker_map": {},
+    "aruco_output_size": [
+        1000,
+        1000
+    ]
 }
