@@ -3,7 +3,11 @@ from src.pipeline import run_analysis
 
 def main():
     """
-    Main function to parse command-line arguments and initiate the analysis.
+    This script serves as the command-line interface (CLI) for the Visual Analyzer application.
+    
+    It parses command-line arguments to configure and run the image and video analysis pipeline.
+    The script supports various analysis features, including color correction, color analysis,
+    image alignment, background removal, and symmetry analysis.
     """
     parser = argparse.ArgumentParser(description="Visual Analyzer for Color Correction and Analysis.")
     parser.add_argument("--project", type=str, help="Name of the project to use.")
@@ -27,6 +31,11 @@ def main():
     parser.add_argument("--agg-min-area", type=float, default=0.0005, help="Minimum area ratio for keeping a component during aggregation.")
     parser.add_argument("--agg-density-thresh", type=float, default=0.5, help="Minimum density of original pixels for an aggregated area to be kept.")
     parser.add_argument("--blur-kernel", type=int, nargs=2, metavar=('W', 'H'), help="Specify a custom kernel size (width height) for blurring. Both values must be odd.")
+
+    parser.add_argument("--skip-color-analysis", action="store_true", help="Skip the color analysis step.")
+    parser.add_argument("--skip-report-generation", action="store_true", help="Skip the report generation step.")
+    parser.add_argument("--save-state-to", type=str, help="Path to save the pipeline state.")
+    parser.add_argument("--load-state-from", type=str, help="Path to load a previously saved pipeline state.")
 
     args = parser.parse_args()
     

@@ -1,4 +1,9 @@
-# src/alignment/aligner.py
+"""
+This module provides classes for image alignment using ArUco markers.
+
+It includes functionalities for generating ArUco marker maps, detecting markers in images,
+and performing perspective correction to align images based on marker locations.
+"""
 
 import cv2
 import numpy as np
@@ -20,7 +25,26 @@ def generate_aruco_marker_map(
 ) -> dict:
     """
     Generates a map of ideal corner coordinates for ArUco markers.
-    (This function is unchanged)
+
+    This function is used to define the target positions for ArUco markers
+    when performing perspective correction. It assumes a 4-marker setup
+    for the four corners of a rectangular region.
+
+    Args:
+        output_size_wh (tuple): A tuple (width, height) representing the desired
+                                output size of the aligned image in pixels.
+        marker_ids (list): A list of exactly 4 integer IDs for the ArUco markers,
+                           ordered as [top-left, top-right, bottom-right, bottom-left].
+        marker_size_px (int): The size of the square ArUco marker in pixels.
+        margin_px (int, optional): The margin from the image border to the marker
+                                   in pixels. Defaults to 0.
+
+    Returns:
+        dict: A dictionary where keys are marker IDs and values are numpy arrays
+              representing the ideal corner coordinates (x, y) for each marker.
+
+    Raises:
+        ValueError: If the `marker_ids` list does not contain exactly 4 IDs.
     """
     if len(marker_ids) != 4:
         raise ValueError(
@@ -66,7 +90,7 @@ def generate_aruco_marker_map(
 
 
 class ArucoAligner:
-    """A class to handle image alignment by correcting perspective using ArUco markers."""
+    """Handles image alignment by correcting perspective using ArUco markers."""
 
     def __init__(
         self,
@@ -74,6 +98,16 @@ class ArucoAligner:
         debug_mode: bool = False,
         output_dir: str = "output_aruco",
     ):
+        """
+        Initializes the ArucoAligner with a specified ArUco dictionary and debug settings.
+
+        Args:
+            aruco_dict (int): The OpenCV predefined ArUco dictionary to use (e.g., cv2.aruco.DICT_4X4_50).
+            debug_mode (bool, optional): If True, enables debug output and saves intermediate images.
+                                         Defaults to False.
+            output_dir (str, optional): Directory to save debug images if `debug_mode` is True.
+                                        Defaults to "output_aruco".
+        """
         self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(aruco_dict)
         self.aruco_parameters = cv2.aruco.DetectorParameters()
         
@@ -98,9 +132,42 @@ class ArucoAligner:
     def align_image_by_markers(
         self, image: np.ndarray, marker_map: dict, output_size_wh: tuple
     ):
-        # (This method's code is CHANGED)
-        if image is None:
-            raise ValueError("Input image is None.")
+        """
+        Aligns an input image by correcting its perspective based on detected ArUco markers
+        and their ideal positions defined in a marker map.
+
+        This method detects ArUco markers in the input `image`, matches them against
+        the provided `marker_map`, and calculates a homography matrix to warp the image
+        to a corrected perspective.
+
+        Args:
+            image (np.ndarray): The input image (BGR format) to be aligned.
+            marker_map (dict): A dictionary defining the ideal corner coordinates for
+                               each ArUco marker ID. Keys are marker IDs (int), values
+                               are numpy arrays of shape (4, 2) representing the
+                               top-left, top-right, bottom-right, and bottom-left
+                               corners of the marker in the ideal output space.
+            output_size_wh (tuple): A tuple (width, height) specifying the desired
+                                    dimensions of the aligned output image.
+
+        Returns:
+            tuple: A tuple containing:
+                - aligned_image (np.ndarray or None): The perspective-corrected image,
+                                                      or None if alignment fails.
+                - homography (np.ndarray or None): The 3x3 homography matrix used for
+                                                  alignment, or None.
+                - corners (list or None): List of detected marker corners.
+                - ids (np.ndarray or None): Array of detected marker IDs.
+                - used_marker_map (dict or None): The subset of `marker_map` corresponding
+                                                  to successfully detected markers.
+                - source_points (np.ndarray or None): The 4 source points used for homography
+                                                      calculation.
+                - dest_points (np.ndarray or None): The 4 destination points used for homography
+                                                    calculation.
+
+        Raises:
+            ValueError: If the input `image` is None.
+        """
 
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = self.detector.detectMarkers(gray_image)
@@ -273,10 +340,21 @@ class ArucoAligner:
 
 # The Aligner class and the __main__ block can remain exactly as you had them.
 class Aligner:
-    """Main aligner class."""
+    """
+    A wrapper class that provides a simplified interface for image alignment
+    using ArUco markers. It utilizes the `ArucoAligner` internally.
+    """
 
     def __init__(self, debug_mode: bool = False, output_dir: str = "output"):
-        # (This class is unchanged)
+        """
+        Initializes the Aligner.
+
+        Args:
+            debug_mode (bool, optional): If True, enables debug output and saves intermediate images.
+                                         Defaults to False.
+            output_dir (str, optional): Base directory for output, including ArUco debug images.
+                                        Defaults to "output".
+        """
         self.debug_mode = debug_mode
         self.output_dir = output_dir
         aruco_output_dir = (
@@ -287,6 +365,33 @@ class Aligner:
         )
 
     def align_image(self, image: np.ndarray, aruco_reference_path: str = None, marker_map: dict = None, output_size_wh: tuple = None):
+        """
+        Aligns an image using either a reference ArUco image or a predefined marker map.
+
+        Args:
+            image (np.ndarray): The input image (BGR format) to be aligned.
+            aruco_reference_path (str, optional): Path to an image containing the ideal
+                                                  ArUco markers for alignment. If provided,
+                                                  `marker_map` and `output_size_wh` are ignored.
+            marker_map (dict, optional): A dictionary defining the ideal corner coordinates
+                                         for each ArUco marker ID. Required if
+                                         `aruco_reference_path` is not provided.
+            output_size_wh (tuple, optional): A tuple (width, height) specifying the desired
+                                              dimensions of the aligned output image.
+                                              Required if `marker_map` is provided.
+
+        Returns:
+            tuple: A tuple containing:
+                - aligned_image (np.ndarray or None): The aligned image, or None if alignment fails.
+                - alignment_data (dict or None): A dictionary containing details about the alignment,
+                                                 such as the homography matrix, detected corners, etc.,
+                                                 or None if alignment fails.
+
+        Raises:
+            ValueError: If neither `aruco_reference_path` nor both `marker_map` and
+                        `output_size_wh` are provided.
+            FileNotFoundError: If `aruco_reference_path` is provided but the file cannot be read.
+        """
         if aruco_reference_path:
             reference_image = cv2.imread(aruco_reference_path)
             if reference_image is None:

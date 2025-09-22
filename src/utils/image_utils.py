@@ -1,18 +1,30 @@
+"""
+This module provides utility functions for common image processing operations
+such as loading, saving, and blurring images using OpenCV.
+"""
+
 import cv2
 import numpy as np
 from typing import Tuple
 
-def load_image(image_path: str, handle_transparency: bool = True):
+def load_image(image_path: str, handle_transparency: bool = True) -> Tuple[np.ndarray, np.ndarray | None]:
     """
     Loads an image from the specified path.
 
     Args:
         image_path (str): The path to the image file.
-        handle_transparency (bool): If True, converts RGBA to RGB and creates a mask for transparent pixels.
+        handle_transparency (bool): If True, and the image has an alpha channel (RGBA),
+                                    it separates the alpha channel and returns the image
+                                    as BGR. Otherwise, it loads the image as is.
 
     Returns:
-        np.ndarray: The loaded image (RGB or BGR).
-        np.ndarray or None: The alpha channel (mask) if handle_transparency is True and image has alpha, else None.
+        Tuple[np.ndarray, np.ndarray | None]: A tuple containing:
+            - The loaded image (NumPy array in BGR format).
+            - The alpha channel (NumPy array) if `handle_transparency` is True and the
+              image has an alpha channel, otherwise None.
+
+    Raises:
+        FileNotFoundError: If the image file does not exist at the specified path.
     """
     img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
 
@@ -28,27 +40,31 @@ def load_image(image_path: str, handle_transparency: bool = True):
 
 def save_image(image_path: str, image: np.ndarray):
     """
-    Saves an image to the specified path.
+    Saves a NumPy array image to the specified file path.
 
     Args:
-        image_path (str): The path to save the image file.
-        image (np.ndarray): The image to save.
+        image_path (str): The full path, including filename and extension, where the image will be saved.
+        image (np.ndarray): The image data as a NumPy array.
     """
     cv2.imwrite(image_path, image)
 
-def blur_image(image: np.ndarray, kernel_size: Tuple[int, int] = None) -> Tuple[np.ndarray, Tuple[int, int]]:
+def blur_image(image: np.ndarray, kernel_size: Tuple[int, int] | None = None) -> Tuple[np.ndarray, Tuple[int, int]]:
     """
-    Applies Gaussian blur to the image.
-    If kernel_size is not provided, it is calculated adaptively based on image dimensions.
+    Applies a Gaussian blur filter to the input image.
+
+    If `kernel_size` is not provided, it is adaptively calculated based on the
+    smaller dimension of the image to ensure a reasonable blur effect.
 
     Args:
-        image (np.ndarray): The input image.
-        kernel_size (Tuple[int, int], optional): Size of the Gaussian kernel.
-                                                  If None, it's calculated automatically.
-                                                  Defaults to None.
+        image (np.ndarray): The input image to be blurred.
+        kernel_size (Tuple[int, int] | None, optional): The size of the Gaussian kernel (width, height).
+                                                        Both dimensions must be odd. If None, it's calculated automatically.
+                                                        Defaults to None.
 
     Returns:
-        Tuple[np.ndarray, Tuple[int, int]]: A tuple containing the blurred image and the kernel size used.
+        Tuple[np.ndarray, Tuple[int, int]]: A tuple containing:
+            - The blurred image as a NumPy array.
+            - The kernel size (width, height) that was actually used for blurring.
     """
     if kernel_size is None:
         # Adaptively calculate kernel size based on the smaller dimension of the image.

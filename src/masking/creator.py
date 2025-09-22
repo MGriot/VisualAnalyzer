@@ -1,3 +1,9 @@
+"""
+This module provides the `MaskCreator` class for generating and applying masks
+from drawing images. It supports creating masks based on transparency and color,
+and applying these masks to images to achieve background removal effects.
+"""
+
 import cv2
 import numpy as np
 from src.utils.image_utils import load_image
@@ -5,6 +11,10 @@ from src.utils.image_utils import load_image
 class MaskCreator:
     """
     A class to create and apply masks from drawing files.
+
+    It provides methods to generate a binary mask from an input drawing image
+    (supporting transparency and white color as background) and to apply this
+    mask to another image, typically to make the background transparent.
     """
 
     def create_mask(
@@ -17,13 +27,14 @@ class MaskCreator:
         All other pixels are considered background (value 0).
 
         Args:
-            drawing_path (str): The path to the drawing image.
-            treat_white_as_bg (bool): If True, white pixels (255, 255, 255) are also
-                                      treated as background.
+            drawing_path (str): The path to the drawing image file.
+            treat_white_as_bg (bool): If True, pure white pixels (255, 255, 255) in the
+                                      drawing image are also treated as background and
+                                      will be masked out.
 
         Returns:
-            np.ndarray: A single-channel 8-bit binary mask (foreground is 255).
-                        Returns None if the image cannot be loaded.
+            np.ndarray: A single-channel 8-bit binary mask (foreground is 255, background is 0).
+                        Returns None if the image cannot be loaded from `drawing_path`.
         """
         drawing_img, alpha_channel = load_image(drawing_path, handle_transparency=True)
 
@@ -49,14 +60,19 @@ class MaskCreator:
 
     def apply_mask(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """
-        Applies a mask to an image, making the background transparent.
+        Applies a binary mask to an image, making the masked-out regions transparent.
+
+        The input image is converted to BGRA format, and its alpha channel is set
+        according to the provided `mask`. If the mask dimensions do not match the
+        image, the mask is resized using nearest-neighbor interpolation.
 
         Args:
-            image (np.ndarray): The input BGR image.
-            mask (np.ndarray): The single-channel binary mask.
+            image (np.ndarray): The input BGR or grayscale image.
+            mask (np.ndarray): The single-channel binary mask (0 for transparent, 255 for opaque).
 
         Returns:
-            np.ndarray: A BGRA image with a transparent background.
+            np.ndarray: A BGRA image with a transparent background where the mask was 0.
+                        If `mask` is None, the original image is returned unchanged.
         """
         if mask is None:
             return image

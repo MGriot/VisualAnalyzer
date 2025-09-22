@@ -1,3 +1,10 @@
+"""
+This module defines global configuration variables and paths for the Visual Analyzer application.
+
+It centralizes important directory paths, model locations, and report metadata,
+making it easier to manage and update project-wide settings.
+"""
+
 import os
 from pathlib import Path
 

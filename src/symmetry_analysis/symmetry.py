@@ -1,3 +1,11 @@
+"""
+This module provides the `SymmetryAnalyzer` class for performing various types
+of symmetry analysis on images.
+
+It quantifies an image's invariance under reflection, rotation, translation,
+and glide-reflection, providing scores and visualizations for each type of symmetry.
+"""
+
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,14 +26,31 @@ class SymmetryAnalyzer:
 
     It quantifies the image's invariance under various geometric transformations
     (isometries) and provides detailed results and visualizations.
+
+    Attributes:
+        original_image (np.ndarray): The input image provided during initialization.
+        processed_image (np.ndarray): The preprocessed grayscale image used for analysis.
+        mask (np.ndarray): A mask indicating active pixels for similarity calculations.
+        results (dict): A dictionary storing the symmetry analysis results (scores, chunks, etc.).
     """
     def __init__(self, image):
+        """
+        Initializes the SymmetryAnalyzer with an image to be analyzed.
+
+        Args:
+            image (np.ndarray): The input image (BGR, BGRA, or grayscale) for symmetry analysis.
+        """
         self.original_image = image
         self.results = {}
         self._preprocess_image()
 
     def _preprocess_image(self):
-        """Prepares the image for analysis (grayscale, even dimensions)."""
+        """
+        Preprocesses the input image for symmetry analysis.
+
+        Converts the image to grayscale and ensures its dimensions are even
+        by cropping if necessary. Also extracts or creates a mask.
+        """
         if len(self.original_image.shape) == 3 and self.original_image.shape[2] == 4:
             self.gray_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGRA2GRAY)
             self.mask = self.original_image[:, :, 3]
@@ -41,11 +66,21 @@ class SymmetryAnalyzer:
         self.processed_image = self.gray_image[0:h, 0:w]
         self.mask = self.mask[0:h, 0:w]
 
-    def _calculate_similarity(self, part1, part2, mask=None):
+    def _calculate_similarity(self, part1: np.ndarray, part2: np.ndarray, mask: np.ndarray = None) -> float:
         """
-        Calculates a normalized similarity score using the L1 norm (Mean Absolute Difference).
-        This metric measures the average difference between pixel intensities. A score of 1.0
-        signifies perfect identity between the two parts.
+        Calculates a normalized similarity score between two image parts using the L1 norm.
+
+        A score of 1.0 indicates perfect identity. If a mask is provided, only active
+        pixels within the mask are considered for the similarity calculation.
+
+        Args:
+            part1 (np.ndarray): The first image part.
+            part2 (np.ndarray): The second image part.
+            mask (np.ndarray, optional): A binary mask to specify active pixels.
+                                        Defaults to None.
+
+        Returns:
+            float: The normalized similarity score (0.0 to 1.0).
         """
         if part1.shape != part2.shape: return 0
         if mask is not None:
@@ -65,6 +100,12 @@ class SymmetryAnalyzer:
     #  the image is reflected across its central vertical and horizontal axes.
     # ------------------------------------------------------------------------------------
     def analyze_vertical_reflection(self):
+        """
+        Analyzes the vertical reflection symmetry of the processed image.
+
+        It compares the left half of the image with the horizontally flipped right half.
+        The result, including a similarity score, is stored in `self.results`.
+        """
         h, w = self.processed_image.shape
         left_half = self.processed_image[:, 0:w//2]
         right_half = self.processed_image[:, w//2:]
@@ -75,6 +116,12 @@ class SymmetryAnalyzer:
         }
 
     def analyze_horizontal_reflection(self):
+        """
+        Analyzes the horizontal reflection symmetry of the processed image.
+
+        It compares the top half of the image with the vertically flipped bottom half.
+        The result, including a similarity score, is stored in `self.results`.
+        """
         h, w = self.processed_image.shape
         top_half = self.processed_image[0:h//2, :]
         bottom_half = self.processed_image[h//2:, :]
@@ -95,6 +142,14 @@ class SymmetryAnalyzer:
     #  metric of the image's overall dihedral symmetry.
     # ------------------------------------------------------------------------------------
     def analyze_four_quadrant(self):
+        """
+        Analyzes the four-quadrant (Dihedral Group D2) symmetry of the processed image.
+
+        This method calculates a robust, unbiased symmetry score by comparing each
+        quadrant against the others, considering reflections. It also generates
+        an ideal reconstruction for visualization.
+        The result, including a similarity score and reconstruction, is stored in `self.results`.
+        """
         h, w = self.processed_image.shape
         # q1 (top-left), q2 (top-right), q3 (bottom-left), q4 (bottom-right)
         q1 = self.processed_image[0:h//2, 0:w//2]
@@ -157,7 +212,16 @@ class SymmetryAnalyzer:
     #  The comparison must be masked to the overlapping region post-rotation to
     #  avoid penalizing for boundary artifacts (no-data areas).
     # ------------------------------------------------------------------------------------
-    def analyze_rotational(self, angle):
+    def analyze_rotational(self, angle: int):
+        """
+        Analyzes the rotational symmetry of the processed image for a given angle.
+
+        It rotates the image around its center and compares it with the original,
+        masking for overlapping regions. The result is stored in `self.results`.
+
+        Args:
+            angle (int): The rotation angle in degrees (e.g., 90, 180).
+        """
         h, w = self.processed_image.shape
         center = (w // 2, h // 2)
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
@@ -181,7 +245,20 @@ class SymmetryAnalyzer:
     #  Normalized Cross-Correlation Coefficient (TM_CCOEFF_NORMED), indicates the
     #  presence of a repeating motif.
     # ------------------------------------------------------------------------------------
-    def analyze_translational(self, direction='horizontal', template_frac=0.25):
+    def analyze_translational(self, direction: str = 'horizontal', template_frac: float = 0.25):
+        """
+        Analyzes translational symmetry using template matching.
+
+        It extracts a template from one part of the image and searches for it
+        in another part. The maximum correlation indicates the degree of translational symmetry.
+        The result is stored in `self.results`.
+
+        Args:
+            direction (str, optional): The direction of translation ('horizontal' or 'vertical').
+                                       Defaults to 'horizontal'.
+            template_frac (float, optional): The fraction of the image dimension to use for the template size.
+                                             Defaults to 0.25.
+        """
         h, w = self.processed_image.shape
         if direction == 'horizontal':
             tw = int(w * template_frac)
@@ -203,7 +280,18 @@ class SymmetryAnalyzer:
     #  for this reflected template in the other half of the image. A high score
     #  indicates the presence of this complex but common form of symmetry.
     # ------------------------------------------------------------------------------------
-    def analyze_glide_reflection(self, axis='horizontal'):
+    def analyze_glide_reflection(self, axis: str = 'horizontal'):
+        """
+        Analyzes glide-reflection symmetry.
+
+        This involves reflecting a part of the image and then performing template
+        matching to find its best translational match in another part of the image.
+        The result is stored in `self.results`.
+
+        Args:
+            axis (str, optional): The axis of reflection ('horizontal' or 'vertical').
+                                  Defaults to 'horizontal'.
+        """
         h, w = self.processed_image.shape
         if axis == 'horizontal':
             template_orig, search_area = self.processed_image[0:h//2, :], self.processed_image[h//2:, :]
@@ -217,7 +305,13 @@ class SymmetryAnalyzer:
 
     # --- Utility Methods ---
     def analyze_all(self):
-        """Runs a standard suite of analyses."""
+        """
+        Runs a standard suite of symmetry analyses on the processed image.
+
+        This includes vertical reflection, horizontal reflection, four-quadrant,
+        90-degree rotational, 180-degree rotational, translational, and glide-reflection symmetries.
+        Results are stored in `self.results`.
+        """
         self.analyze_vertical_reflection()
         self.analyze_horizontal_reflection()
         self.analyze_four_quadrant()
@@ -227,14 +321,25 @@ class SymmetryAnalyzer:
         self.analyze_glide_reflection()
 
     def report(self):
-        """Prints a formatted report of all analysis scores."""
+        """
+        Prints a formatted report of all calculated symmetry analysis scores to the console.
+        """
         print("\n--- Symmetry Analysis Report ---")
         for key, value in self.results.items():
             print(f"{key.replace('_', ' ').title():<25}: {value['score']:.4f}")
         print("---------------------------------")
         
-    def visualize(self, analysis_type):
-        """Generates a detailed plot for a specific analysis type."""
+    def visualize(self, analysis_type: str):
+        """
+        Generates and displays a detailed plot for a specific symmetry analysis type.
+
+        The plot shows the original processed image and a visualization related to the
+        specified symmetry (e.g., ideal reconstruction, flipped part).
+
+        Args:
+            analysis_type (str): The key for the analysis type in `self.results`
+                                 (e.g., 'vertical_reflection', 'four_quadrant').
+        """
         if analysis_type not in self.results: return
         res = self.results[analysis_type]
         title = f"{analysis_type.replace('_', ' ').title()} (Score: {res['score']:.4f})"

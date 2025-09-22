@@ -1,0 +1,4 @@
+--- Loaded project_config.json for benagol ---
+{}
+-----------------------------------------------------
+No training_rel_path found in config.

@@ -2,7 +2,7 @@
 
 ## Project Description
 
-Visual Analyzer is a powerful Python-based tool for advanced image and video analysis. It provides a comprehensive suite of features for color correction, color zone analysis, image alignment, and symmetry analysis. The tool is designed to be project-based, allowing users to manage different analysis tasks with specific configurations and reference materials.
+Visual Analyzer is a powerful Python-based tool for advanced image and video analysis. It provides a comprehensive suite of features for color correction, color zone analysis, image alignment, and symmetry analysis. The tool is designed to be project-based, allowing users to manage different analysis tasks with specific configurations and reference materials. The application is accessible through a Streamlit-based Graphical User Interface (GUI) and a Command-Line Interface (CLI).
 
 ## Features
 
@@ -16,7 +16,7 @@ Visual Analyzer is a powerful Python-based tool for advanced image and video ana
 *   **Symmetry Analysis:** Analyze the symmetry of an object in an image, including vertical and horizontal reflection, four-quadrant symmetry, and more.
 *   **Flexible Input:** Analyze single images, video files, or live camera streams.
 *   **Interactive Sample Management:** A GUI is provided to interactively define how sample images are used for color range calculation.
-*   **Enhanced GUI:** The main application now features a comprehensive GUI for easy configuration of all analysis parameters, including project selection, file inputs, and advanced options.
+*   **Streamlit GUI:** The main application now features a comprehensive GUI for easy configuration of all analysis parameters, including project selection, file inputs, and advanced options.
 *   **Comprehensive Reporting:** Generate detailed PDF reports summarizing the analysis results, including statistics, processed images, and visualizations.
 *   **Debug Mode:** A debug mode is available for verbose console output and detailed debug reports with intermediate steps and data.
 
@@ -112,13 +112,9 @@ This file defines how sample images in the `training_path` are processed for col
 
 The application can be launched either via a Graphical User Interface (GUI) or through the Command-Line Interface (CLI).
 
-*   **GUI:** To start the GUI, run `gui.py`. You can optionally add `--debug` to show all advanced options.
+*   **GUI:** To start the GUI, run `streamlit_app.py`.
     ```bash
-    python src/gui.py
-    ```
-    or for debug layout:
-    ```bash
-    python src/gui.py --debug
+    streamlit run streamlit_app.py
     ```
     The GUI provides an intuitive way to select projects, input files, and configure analysis options.
 

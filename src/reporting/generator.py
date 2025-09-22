@@ -1,3 +1,12 @@
+"""
+This module provides the `ReportGenerator` class, which is responsible for
+creating comprehensive analysis reports in various formats (HTML, PDF).
+
+It integrates with Jinja2 for HTML templating, WeasyPrint for HTML to PDF conversion,
+and ReportLab for an alternative PDF generation method. It also handles the
+generation of various plots and visualizations for the reports.
+"""
+
 import os
 import datetime
 import cv2 as cv
@@ -34,11 +43,35 @@ from matplotlib.patches import Rectangle
 class ReportGenerator:
     """
     A class to generate analysis reports in HTML and PDF formats.
+
+    This class orchestrates the creation of detailed reports by:
+    - Managing output directories.
+    - Generating various plots (pie charts, color space diagrams, hue-saturation diagrams).
+    - Processing debug information and dataset details for inclusion.
+    - Rendering HTML reports using Jinja2 templates.
+    - Converting HTML reports to PDF using WeasyPrint.
+    - Generating alternative PDF reports using ReportLab.
+    - Archiving report data for later regeneration.
     """
 
     def __init__(self, project_name: str, sample_name: str = None, debug_mode: bool = False):
+        """
+        Initializes the ReportGenerator.
+
+        Sets up output directories and initializes Jinja2 environment for HTML templating.
+
+        Args:
+            project_name (str): The name of the project for which the report is being generated.
+            sample_name (str, optional): The name of the specific sample being analyzed.
+                                         If provided, output will be organized under a sample-specific directory.
+                                         Defaults to None.
+            debug_mode (bool, optional): If True, enables debug-specific features in the report
+                                         (e.g., more detailed sections, debug template).
+                                         Defaults to False.
+        """
         self.project_name = project_name
         self.sample_name = sample_name
+        self.debug_mode = debug_mode
         
         if sample_name:
             self.project_output_dir = config.OUTPUT_DIR / project_name / sample_name
@@ -60,16 +93,47 @@ class ReportGenerator:
             self.env = None
             self.template = None
 
-    def get_step_output_dir(self, step_name: str):
+    def get_step_output_dir(self, step_name: str) -> Path:
+        """
+        Creates and returns the path to a subdirectory for a specific analysis step.
+
+        This helps organize output files generated during different stages of the pipeline.
+
+        Args:
+            step_name (str): The name of the analysis step (e.g., "color_correction", "alignment").
+
+        Returns:
+            Path: The absolute path to the output directory for the specified step.
+        """
         step_dir = self.project_output_dir / step_name
         os.makedirs(step_dir, exist_ok=True)
         return step_dir
 
-    def _generate_pie_chart(self, matched_pixels: int, total_pixels: int, selected_colors: dict) -> str:
+    def _generate_pie_chart(self, matched_pixels: int, total_pixels: int, selected_colors: list) -> str:
+        """
+        Generates a pie chart visualizing the percentage of matched pixels versus unmatched pixels.
+
+        The chart is saved as a PNG image in the reporting output directory.
+
+        Args:
+            matched_pixels (int): The number of pixels that matched the target color range.
+            total_pixels (int): The total number of pixels considered in the analysis.
+            selected_colors (list): A list of dictionaries containing color information.
+                                    The first item's "rgb" value is used for the pie chart.
+
+        Returns:
+            str: The relative path to the generated pie chart image.
+        """
         step_dir = self.get_step_output_dir("reporting")
         labels = ["Matched Pixels", "Unmatched Pixels"]
         sizes = [matched_pixels, total_pixels - matched_pixels]
-        colors_pie = [selected_colors["RGB"] / 255, "darkgray"]
+        
+        # Use the rgb value from the first selected color
+        pie_color = [0.5, 0.5, 0.5] # Default gray
+        if selected_colors and 'rgb' in selected_colors[0]:
+            pie_color = np.array(selected_colors[0]['rgb']) / 255.0
+
+        colors_pie = [pie_color, "darkgray"]
         plt.pie(sizes, labels=labels, colors=colors_pie, autopct="%1.1f%%", startangle=140)
         plt.axis("equal")
         pie_chart_path = step_dir / "pie_chart.png"
@@ -78,6 +142,22 @@ class ReportGenerator:
         return os.path.relpath(pie_chart_path, self.project_output_dir)
 
     def _generate_color_space_plot(self, lower_limit: np.ndarray, upper_limit: np.ndarray, center: tuple, gradient_height=25, num_lines=5) -> str:
+        """
+        Generates a visual representation of the defined HSV color space.
+
+        This plot shows a gradient from the lower to the upper HSV limit, with the
+        center color highlighted. It is saved as a PNG image.
+
+        Args:
+            lower_limit (np.ndarray): NumPy array [H, S, V] representing the lower HSV bounds.
+            upper_limit (np.ndarray): NumPy array [H, S, V] representing the upper HSV bounds.
+            center (tuple): Tuple (H, S, V) representing the center of the HSV color range.
+            gradient_height (int, optional): Height of the color gradient strip in pixels. Defaults to 25.
+            num_lines (int, optional): Number of times the gradient strip is stacked. Defaults to 5.
+
+        Returns:
+            str: The relative path to the generated color space plot image.
+        """
         step_dir = self.get_step_output_dir("reporting")
         lower_rgb = cv.cvtColor(np.uint8([[lower_limit]]), cv.COLOR_HSV2RGB)[0][0]
         upper_rgb = cv.cvtColor(np.uint8([[upper_limit]]), cv.COLOR_HSV2RGB)[0][0]
@@ -101,6 +181,21 @@ class ReportGenerator:
         return os.path.relpath(color_space_plot_path, self.project_output_dir)
 
     def plot_hue_saturation_diagram(self, image_bgr: np.ndarray, lower_hsv: np.ndarray, upper_hsv: np.ndarray, output_path: str) -> str:
+        """
+        Generates a scatter plot showing the Hue-Saturation distribution of an image's pixels.
+
+        The plot highlights the defined HSV color range with a red rectangle.
+        A random sample of pixels is used for plotting to improve performance for large images.
+
+        Args:
+            image_bgr (np.ndarray): The input image in BGR format.
+            lower_hsv (np.ndarray): NumPy array [H, S, V] representing the lower HSV bounds.
+            upper_hsv (np.ndarray): NumPy array [H, S, V] representing the upper HSV bounds.
+            output_path (str): The filename for the generated plot image.
+
+        Returns:
+            str: The relative path to the generated hue-saturation diagram image.
+        """
         step_dir = self.get_step_output_dir("reporting")
         hsv_image = cv.cvtColor(image_bgr, cv.COLOR_BGR2HSV)
         h, s, v = cv.split(hsv_image)
@@ -131,6 +226,23 @@ class ReportGenerator:
         return os.path.relpath(plot_full_path, self.project_output_dir)
 
     def _generate_dataset_color_space_plot(self, dataset_debug_info: list, lower_hsv: np.ndarray, upper_hsv: np.ndarray) -> str:
+        """
+        Generates a scatter plot visualizing the color distribution of the training dataset.
+
+        Each point represents an extracted color from a training image, colored by its average RGB.
+        The calculated HSV range is overlaid as a red rectangle.
+
+        Args:
+            dataset_debug_info (list): A list of dictionaries containing debug information
+                                       about the dataset, including extracted HSV colors.
+            lower_hsv (np.ndarray): NumPy array [H, S, V] representing the lower HSV bounds
+                                    of the calculated range.
+            upper_hsv (np.ndarray): NumPy array [H, S, V] representing the upper HSV bounds
+                                    of the calculated range.
+
+        Returns:
+            str: The relative path to the generated dataset color space plot image.
+        """
         step_dir = self.get_step_output_dir("reporting")
         fig, ax = plt.subplots(figsize=(12, 8))
 
@@ -159,9 +271,27 @@ class ReportGenerator:
         return os.path.relpath(plot_path, self.project_output_dir)
 
     def _process_dataset_debug_info(self, dataset_debug_info: list) -> list:
+        """
+        Processes raw dataset debug information to prepare it for reporting.
+
+        This includes drawing sample points on images, generating color palettes,
+        and converting color formats for display in the report.
+
+        Args:
+            dataset_debug_info (list): A list of dictionaries containing raw debug
+                                       information for each dataset item.
+
+        Returns:
+            list: A list of processed dictionaries, with added paths to images
+                  with points, and detailed color information for reporting.
+        """
         step_dir = self.get_step_output_dir("reporting")
         processed_items = []
         for i, item in enumerate(dataset_debug_info):
+            print(f"--- Debugging item in _process_dataset_debug_info ---")
+            print(f"Item type: {type(item)}")
+            print(f"Item content: {item}")
+            print(f"-----------------------------------------------------")
             processed_item = item.copy()
             img = cv.imread(item['path'])
             if img is None: continue
@@ -204,33 +334,56 @@ class ReportGenerator:
         return processed_items
 
     def _generate_reportlab_pdf(self, report_data: dict, base_dir: Path, pdf_path: str):
+        """
+        Generates a PDF report using the ReportLab library.
+
+        This method constructs the PDF document by adding various elements like
+        text, tables, and images based on the provided `report_data`.
+
+        Args:
+            report_data (dict): A dictionary containing all the data required for the report.
+            base_dir (Path): The base directory from which relative image paths are resolved.
+            pdf_path (str): The full path where the generated PDF will be saved.
+        """
         doc = SimpleDocTemplate(str(pdf_path), pagesize=A4, topMargin=inch/2, bottomMargin=inch/2)
         styles = getSampleStyleSheet()
         story = []
 
+        # Custom styles
         title_style = styles['h1']
         h2_style = styles['h2']
         h3_style = styles['h3']
         body_style = styles['BodyText']
         code_style = styles['Code']
+        path_style = ParagraphStyle('path_style', parent=styles['Italic'], fontSize=8, textColor=colors.grey)
 
+        # Enhanced add_image helper function
         def add_image(path_key, caption_text, width=6*inch):
-            img_path_str = report_data.get(path_key) or (isinstance(path_key, str) and path_key)
-            if not isinstance(img_path_str, str) or not img_path_str:
+            img_path_str = report_data.get(path_key)
+            # Handle cases where the path_key itself is the path (for pipeline images)
+            if not img_path_str and isinstance(path_key, str) and (path_key.endswith('.png') or path_key.endswith('.jpg')):
+                img_path_str = path_key
+
+            story.append(Paragraph(caption_text, h3_style))
+            if not img_path_str:
+                story.append(Paragraph(f"<i>(Image path not found in report data for key: {path_key})</i>", body_style))
+                story.append(Spacer(1, 0.1*inch))
                 return
-            
+
             img_path = base_dir / img_path_str
             if img_path.is_file():
-                story.append(Paragraph(caption_text, h3_style))
                 try:
                     img = Image(str(img_path), width=width, height=width/1.5, kind='proportional')
                     story.append(img)
+                    story.append(Paragraph(f"Path: {img_path_str}", path_style))
                     story.append(Spacer(1, 0.1*inch))
                 except Exception as e:
                     story.append(Paragraph(f"<i>Could not load image: {os.path.basename(img_path_str)} ({e})</i>", body_style))
             else:
-                story.append(Paragraph(f"<i>{caption_text} (Image not found at {img_path_str})</i>", body_style))
+                story.append(Paragraph(f"<i>(Image not found at {img_path_str})</i>", body_style))
+                story.append(Spacer(1, 0.1*inch))
 
+        # --- Main Report Content ---
         story.append(Paragraph(report_data.get('report_title', 'Analysis Report'), title_style))
         story.append(Spacer(1, 0.2*inch))
 
@@ -241,21 +394,28 @@ class ReportGenerator:
         story.append(meta_table)
         story.append(Spacer(1, 0.2*inch))
 
-        add_image('analyzed_image_path', 'Analyzed Image')
-        add_image('hsv_diagram_path', 'Hue-Saturation Diagram')
+        add_image('analyzed_image_path', 'Image Before Color Analysis')
+        add_image('contours_image_path', 'Image After Color Analysis (with Contours)')
         add_image('pie_chart_path', 'Pixel-Percentage Pie Chart', width=4*inch)
 
+        # --- Debug Section ---
         if report_data.get("debug_data"):
-            story.append(PageBreak())
-            story.append(Paragraph("Debug Information", title_style))
             debug_data = report_data["debug_data"]
+            story.append(PageBreak())
+            story.append(Paragraph("Debug Report", title_style))
+            story.append(Spacer(1, 0.2*inch))
 
             story.append(Paragraph("Analysis Details", h2_style))
             debug_table_data = []
             for key, value in debug_data.items():
-                if key in ['image_pipeline', 'dataset_debug_info', 'symmetry_visualizations', '--- Project Info ---', '--- Analysis Settings ---', '--- Analysis Results ---', '--- Symmetry Analysis Results ---']:
+                if key in ['image_pipeline', 'dataset_debug_info', 'symmetry_visualizations', 'symmetry_results']:
                     continue
-                value_str = json.dumps(value, indent=2) if isinstance(value, (dict, list)) else str(value)
+                
+                try:
+                    value_str = json.dumps(value, indent=2) if isinstance(value, (dict, list)) else str(value)
+                except TypeError:
+                    value_str = "<Contains non-serializable data>"
+
                 debug_table_data.append([Paragraph(str(key), body_style), Paragraph(value_str.replace('\n', '<br/>'), code_style)])
 
             if debug_table_data:
@@ -272,14 +432,16 @@ class ReportGenerator:
             if 'image_pipeline' in debug_data:
                 story.append(PageBreak())
                 story.append(Paragraph("Image Processing Pipeline", h2_style))
+                story.append(Spacer(1, 0.2*inch))
                 for step in debug_data['image_pipeline']:
                     add_image(step['path'], step['title'])
             
-            if debug_data.get('symmetry_visualizations'):
+            if debug_data.get('symmetry_results'):
                 story.append(PageBreak())
                 story.append(Paragraph("Symmetry Analysis", h2_style))
                 story.append(Paragraph("Scores:", h3_style))
-                symmetry_scores = [[k,v] for k,v in debug_data.items() if k.startswith('Symmetry:')] 
+                scores_only = {k: v.get('score', 'N/A') for k, v in debug_data['symmetry_results'].items()}
+                symmetry_scores = [[k,v] for k,v in scores_only.items()]
                 if symmetry_scores:
                     tbl = Table(symmetry_scores, colWidths=[2.5*inch, 4*inch])
                     tbl.setStyle(TableStyle([
@@ -287,11 +449,12 @@ class ReportGenerator:
                         ('GRID', (0,0), (-1,-1), 1, colors.black),
                     ]))
                     story.append(tbl)
-                    story.append(Spacer(1, 0.2*inch))
+                story.append(Spacer(1, 0.2*inch))
                 
-                story.append(Paragraph("Visualizations:", h3_style))
-                for step in debug_data['symmetry_visualizations']:
-                    add_image(step['path'], step['title'])
+                if debug_data.get('symmetry_visualizations'):
+                    story.append(Paragraph("Visualizations:", h3_style))
+                    for step in debug_data['symmetry_visualizations']:
+                        add_image(step['path'], step['title'])
 
             if report_data.get('dataset_color_space_plot_path'):
                 story.append(PageBreak())
@@ -330,10 +493,27 @@ class ReportGenerator:
                         story.append(Spacer(1, 0.2*inch))
 
         doc.build(story)
-        print(f"ReportLab PDF report saved to {pdf_path}")
+        if self.debug_mode:
+            print(f"ReportLab PDF report saved to {pdf_path}")
 
     def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None, report_type: str = 'all'):
-        """Generates all report files from the analysis results."""
+        """
+        Generates all specified report files (HTML, PDF) from the analysis results.
+
+        This is the main method for report generation, orchestrating the creation
+        of plots, processing data, rendering templates, and archiving the report.
+
+        Args:
+            analysis_results (dict): A dictionary containing the results of the image analysis.
+            metadata (dict): A dictionary containing metadata for the report (e.g., part number, thickness).
+            debug_data (dict, optional): A dictionary containing additional debug information
+                                         to be included in the report. Defaults to None.
+            report_type (str, optional): The type of report(s) to generate. Can be 'html',
+                                         'reportlab', or 'all'. Defaults to 'all'.
+
+        Returns:
+            dict: The dictionary of template variables used to generate the report.
+        """
         pie_chart_path = self._generate_pie_chart(analysis_results['matched_pixels'], analysis_results['total_pixels'], analysis_results['selected_colors'])
         color_space_plot_path = self._generate_color_space_plot(analysis_results['lower_limit'], analysis_results['upper_limit'], analysis_results['center_color'])
         chromaticity_diagram_path = self.plot_hue_saturation_diagram(analysis_results['original_image'], analysis_results['lower_limit'], analysis_results['upper_limit'], "hue_saturation_diagram.png")
@@ -358,11 +538,12 @@ class ReportGenerator:
             "author": config.AUTHOR, "department": config.DEPARTMENT,
             "report_title": f"{config.REPORT_TITLE} - {self.project_name}",
             "logo": logo_path,
-            "today": datetime.datetime.now().strftime("%Y-%m-%d"),
+            "today": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S" if self.debug_mode else "%Y-%m-%d"),
             "part_number": metadata.get("part_number", "N/A"),
             "thickness": metadata.get("thickness", "N/A"),
             "image_path": os.path.relpath(orig_img_path, self.project_output_dir),
-            "analyzed_image_path": os.path.relpath(analysis_results['analyzed_image_path'], self.project_output_dir),
+            "analyzed_image_path": os.path.relpath(analysis_results['input_to_analysis_path'], self.project_output_dir),
+            "contours_image_path": os.path.relpath(analysis_results['contours_image_path'], self.project_output_dir),
             "color_space_plot_path": color_space_plot_path,
             "hsv_diagram_path": chromaticity_diagram_path,
             "pie_chart_path": pie_chart_path,
@@ -372,15 +553,43 @@ class ReportGenerator:
             "report_type": report_type,
         }
 
+        template_vars['analysis_results_raw'] = analysis_results
+
         self.generate_from_archived_data(template_vars, self.project_output_dir, is_regeneration=False)
 
-        report_archiver = ReportArchiver(self.project_output_dir)
-        report_archiver.archive_report(template_vars, self.project_output_dir)
+        # Create a serializable object that includes the numpy arrays
+        serializable_data = template_vars.copy()
+        serializable_data['analysis_results_raw'] = analysis_results
+        serializable_data['numpy_images'] = {
+            'original': analysis_results.get('original_image'),
+            'processed': analysis_results.get('processed_image'),
+            'mask': analysis_results.get('mask'),
+            'negative_mask': analysis_results.get('negative_mask'),
+        }
+
+        report_archiver = ReportArchiver(self.project_output_dir, debug_mode=self.debug_mode)
+        report_archiver.archive_report(serializable_data)
+
+        return template_vars
 
     def generate_from_archived_data(self, report_data: dict, base_dir: Path, is_regeneration: bool = True):
-        """Generates HTML and PDF reports from a data dictionary."""
+        """
+        Generates HTML and PDF reports from a pre-existing data dictionary (e.g., from an archive).
+
+        This method is used for regenerating reports without re-running the full analysis pipeline.
+
+        Args:
+            report_data (dict): A dictionary containing all the data required for the report.
+            base_dir (Path): The base directory from which relative image paths are resolved.
+            is_regeneration (bool, optional): If True, prefixes output filenames with "regenerated_".
+                                             Defaults to True.
+        """
         report_type = report_data.get('report_type', 'all')
-        prefix = "regenerated_" if is_regeneration else ""
+        prefix = ""
+        if self.debug_mode:
+            prefix += "debug_"
+        if is_regeneration:
+            prefix += "regenerated_"
         part_number = report_data.get('part_number', 'report')
 
         # HTML and WeasyPrint PDF Generation
@@ -391,10 +600,12 @@ class ReportGenerator:
                 report_pdf_path = self.project_output_dir / f"{prefix}{part_number}.pdf"
 
                 with open(report_html_path, "w", encoding='utf-8') as f: f.write(html_content)
-                print(f"HTML report saved to {report_html_path}")
+                if self.debug_mode:
+                    print(f"HTML report saved to {report_html_path}")
 
                 HTML(string=html_content, base_url=str(base_dir)).write_pdf(report_pdf_path)
-                print(f"PDF report saved to {report_pdf_path}")
+                if self.debug_mode:
+                    print(f"PDF report saved to {report_pdf_path}")
             elif not HAS_WEASYPRINT:
                 print("[WARNING] jinja2 and/or weasyprint not installed. Skipping HTML/WeasyPrint PDF generation.")
 

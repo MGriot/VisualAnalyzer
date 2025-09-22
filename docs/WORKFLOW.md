@@ -70,7 +70,7 @@ This launches a GUI to select points. Your selections are saved in `dataset_item
 
 ### Step 5: Run the Analysis
 
-Finally, you can run the main analysis pipeline using `src/main.py`. The pipeline now includes two new optional steps: **Object Alignment** and **Masking**.
+Finally, you can run the main analysis pipeline using `streamlit_app.py` or `src/main.py`. The pipeline now includes two new optional steps: **Object Alignment** and **Masking**.
 
 **Pipeline Order:**
 1.  Color Correction (`--color-alignment`)

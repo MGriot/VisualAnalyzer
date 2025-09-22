@@ -52,14 +52,10 @@ The `main.py` script provides a variety of command-line arguments to customize t
 
 ## GUI Usage
 
-To launch the Graphical User Interface (GUI), run `gui.py`. You can optionally add `--debug` to show all advanced options:
+To launch the Graphical User Interface (GUI), run `streamlit_app.py`:
 
 ```bash
-python src/gui.py
-```
-or for debug layout:
-```bash
-python src/gui.py --debug
+streamlit run streamlit_app.py
 ```
 
 The GUI provides an intuitive way to configure and run the analysis. Here's a breakdown of its elements:

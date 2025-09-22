@@ -1,26 +1,24 @@
 import tkinter as tk
 from tkinter import messagebox
-from PIL import Image, ImageTk
-import cv2
+import os
 import json
 from pathlib import Path
-from typing import List, Dict
+import cv2
+from PIL import Image, ImageTk
 
 class DatasetManagerGUI:
-    def __init__(self, master, image_paths: List[Path], config_file_path: Path):
+    def __init__(self, master, image_paths: list, config_file_path: str):
         self.master = master
         self.image_paths = image_paths
-        self.config_file_path = config_file_path
+        self.config_file_path = Path(config_file_path)
         self.current_image_index = 0
         self.image_points = {}
 
         self.master.title("Dataset Manager")
+        self.master.grab_set()
 
-        # Load existing config
         self.load_config()
 
-        # --- UI Elements ---
-        # Frame for image canvas
         self.canvas_frame = tk.Frame(master)
         self.canvas_frame.pack(pady=10)
 
@@ -28,7 +26,6 @@ class DatasetManagerGUI:
         self.canvas.pack()
         self.canvas.bind("<Button-1>", self.on_canvas_click)
 
-        # Frame for image info and navigation
         self.nav_frame = tk.Frame(master)
         self.nav_frame.pack(pady=5)
 
@@ -41,7 +38,6 @@ class DatasetManagerGUI:
         self.next_button = tk.Button(self.nav_frame, text="Next >>", command=self.next_image)
         self.next_button.pack(side=tk.LEFT, padx=5)
 
-        # Frame for actions
         self.action_frame = tk.Frame(master)
         self.action_frame.pack(pady=10)
 
@@ -51,7 +47,6 @@ class DatasetManagerGUI:
         self.save_button = tk.Button(self.action_frame, text="Save and Close", command=self.save_and_close)
         self.save_button.pack(side=tk.LEFT, padx=5)
 
-        # Load the first image
         self.load_image()
 
     def load_config(self):
@@ -63,11 +58,12 @@ class DatasetManagerGUI:
 
     def load_image(self):
         image_path = self.image_paths[self.current_image_index]
-        self.image_label.config(text=f"Image {self.current_image_index + 1} / {len(self.image_paths)}: {image_path.name}")
+        image_name = os.path.basename(image_path)
+        self.image_label.config(text=f"Image {self.current_image_index + 1} / {len(self.image_paths)}: {image_name}")
 
         image_bgr = cv2.imread(str(image_path))
         if image_bgr is None:
-            messagebox.showerror("Error", f"Could not load image: {image_path.name}")
+            messagebox.showerror("Error", f"Could not load image: {image_name}")
             return
 
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
@@ -79,7 +75,7 @@ class DatasetManagerGUI:
         self.draw_points()
 
     def on_canvas_click(self, event):
-        image_name = self.image_paths[self.current_image_index].name
+        image_name = os.path.basename(self.image_paths[self.current_image_index])
         if image_name not in self.image_points:
             self.image_points[image_name] = []
         
@@ -88,14 +84,14 @@ class DatasetManagerGUI:
 
     def draw_points(self):
         self.canvas.delete("point")
-        image_name = self.image_paths[self.current_image_index].name
+        image_name = os.path.basename(self.image_paths[self.current_image_index])
         points = self.image_points.get(image_name, [])
         for point in points:
             x, y, r = point['x'], point['y'], point.get('radius', 7)
             self.canvas.create_oval(x - r, y - r, x + r, y + r, fill="red", outline="red", tags="point")
 
     def clear_points(self):
-        image_name = self.image_paths[self.current_image_index].name
+        image_name = os.path.basename(self.image_paths[self.current_image_index])
         if image_name in self.image_points:
             self.image_points[image_name] = []
             self.draw_points()
@@ -112,32 +108,24 @@ class DatasetManagerGUI:
 
     def save_and_close(self):
         image_configs = []
-        for image_path in self.image_paths:
-            image_name = image_path.name
-            points = self.image_points.get(image_name)
+        current_image_names = {os.path.basename(p) for p in self.image_paths}
 
+        if self.config_file_path.exists():
+            with open(self.config_file_path, 'r') as f:
+                existing_config_data = json.load(f)
+                for cfg in existing_config_data.get("image_configs", []):
+                    if cfg["filename"] not in current_image_names:
+                        image_configs.append(cfg)
+
+        for image_path in self.image_paths:
+            image_name = os.path.basename(image_path)
+            points = self.image_points.get(image_name)
             if points is not None:
-                # If there are points, the method is 'points'
                 image_configs.append({
                     "filename": image_name,
                     "method": "points",
                     "points": points
                 })
-            else:
-                # If no points were ever added for this image, keep its original config or default to full_average
-                # For simplicity, we'll just not add it to the config if no points are selected, 
-                # allowing the main app to default to full_average.
-                pass
-
-        # Preserve existing configs for images not in the current session
-        if self.config_file_path.exists():
-            with open(self.config_file_path, 'r') as f:
-                existing_config_data = json.load(f)
-                existing_configs = existing_config_data.get("image_configs", [])
-                current_image_names = {p.name for p in self.image_paths}
-                for cfg in existing_configs:
-                    if cfg["filename"] not in current_image_names:
-                        image_configs.append(cfg)
 
         config_data = {"image_configs": image_configs}
         with open(self.config_file_path, 'w') as f:

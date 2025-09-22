@@ -1,51 +1,16 @@
-# src/utils/aruco.py
+"""
+This module provides utility functions for generating printable ArUco marker sheets.
+
+ArUco markers are fiducial markers used in computer vision for tasks like camera
+pose estimation and object detection. This module allows for the creation of
+high-resolution sheets with customizable marker layouts and properties.
+"""
 
 import cv2
 import numpy as np
 import os
 
-# ==============================================================================
-# Introduction to ArUco Markers
-# ==============================================================================
-"""
-What are ArUco Markers?
-
-An ArUco (Augmented Reality University of Cordoba) marker is a specific type of fiducial marker used for camera pose estimation and object detection in computer vision. [1] It is essentially a synthetic square marker composed of a wide black border and an inner binary matrix that determines its unique identifier (ID).
-
-How Do They Work?
-
-The detection process involves several steps:
-1.  **Image Thresholding**: The input image is converted to a binary (black and white) format.
-2.  **Contour Detection**: The algorithm searches for square-shaped contours in the binary image.
-3.  **Canonical Form Extraction**: For each square found, the perspective distortion is removed to obtain a frontal, canonical view of the marker.
-4.  **ID Identification**: The inner grid of the marker is analyzed to decode its binary pattern, which is then compared against a predefined dictionary of valid markers to determine its ID. The wide black border facilitates easier and more robust detection. [2]
-5.  **Corner Refinement**: The precise locations of the four corners are refined to sub-pixel accuracy, which is crucial for high-precision applications.
-
-Key Advantages and Potential:
-
-ArUco markers offer several significant advantages that make them a popular choice for many applications:
-
-*   **High Detection Speed and Robustness**: The use of a simple black-and-white pattern and a dictionary-based approach allows for very fast and reliable detection, even under varying lighting conditions or partial occlusion.
-*   **Unique Identification**: Each marker has a unique ID, allowing a camera to distinguish between multiple markers in its field of view. This is essential for tracking multiple objects or creating complex augmented reality scenes.
-*   **Pose Estimation**: Because the real-world size and shape of the marker are known, detecting its four corners in an image allows the system to calculate the camera's 3D position and orientation ("pose") relative to the marker. This is the foundation for augmented reality overlays and robotic navigation. [3]
-*   **Simplicity and Low Cost**: ArUco markers can be generated with a simple script (like this one) and printed on standard paper, making them an extremely low-cost solution for high-precision tracking.
-
-Common Applications:
-
-*   **Robotics**: For robot localization, navigation, and grasping tasks. A robot can determine its position in a room by observing markers placed at known locations.
-*   **Augmented Reality (AR)**: To accurately overlay virtual objects onto the real world. The marker acts as an anchor for the virtual content.
-*   **Camera Calibration**: To determine the intrinsic and extrinsic parameters of a camera with high accuracy.
-*   **Industrial Automation**: For tracking parts on a conveyor belt or guiding automated assembly processes.
-*   **Gesture and Object Tracking**: For creating interactive systems where the movement of a marked object is tracked in real-time.
-
-This script provides a utility to generate printable sheets of ArUco markers for use in such applications.
-
-Bibliography:
-
-[1] S. Garrido-Jurado, R. Muñoz-Salinas, F. J. Madrid-Cuevas, and M. J. Marín-Jiménez. "Automatic generation and detection of highly reliable fiducial markers under occlusion." Pattern Recognition, 2014.
-[2] R. Muñoz-Salinas, S. Garrido-Jurado, M.J. Marín-Jiménez, E.J. Palomo-Amador. "ArUco-Net: A Deep Learning based Fiducial Marker Detection." ArXiv, 2021.
-[3] OpenCV Documentation on ArUco Markers: https://docs.opencv.org/4.x/d5/dae/tutorial_aruco_detection.html
-"""
+# Removed extensive ArUco introduction text to keep the module concise.
 
 # ==============================================================================
 # ArUco Sheet Generation Function
@@ -57,7 +22,7 @@ def create_printable_aruco_sheet(
     output_path: str = "A4_ArUco_Sheet.png",
     aruco_dict_name: int = cv2.aruco.DICT_5X5_250,
     placement: str = "grid",
-    orientation: str = "portrait",  # <<< NEW PARAMETER
+    orientation: str = "portrait",
     markers_per_row: int = 4,
     marker_size_cm: float = 4.0,
     page_margin_cm: float = 1.5,
@@ -67,17 +32,26 @@ def create_printable_aruco_sheet(
     """
     Generates a high-resolution, printable A4 sheet with customizable ArUco markers.
 
+    This function creates an image file (PNG) containing ArUco markers arranged
+    either in a grid or at the corners of the page, suitable for printing.
+
     Args:
         marker_ids (list): A list of integer IDs for the ArUco markers to generate.
         output_path (str): The file path to save the generated PNG image.
-        aruco_dict_name (int): The predefined OpenCV ArUco dictionary to use.
+        aruco_dict_name (int): The predefined OpenCV ArUco dictionary to use
+                               (e.g., `cv2.aruco.DICT_4X4_50`).
         placement (str): The marker placement strategy. Can be 'grid' or 'corners'.
+                         If 'corners', `marker_ids` must contain exactly 4 IDs.
         orientation (str): Page orientation. Can be 'portrait' or 'landscape'.
-        markers_per_row (int): Number of markers per row (only for 'grid' placement).
+        markers_per_row (int): Number of markers per row (only applicable for 'grid' placement).
         marker_size_cm (float): Desired size of each marker in centimeters.
-        page_margin_cm (float): Margin for the page in cm.
-        dpi (int): Resolution in Dots Per Inch for the output image.
-        add_text (bool): If True, adds ID numbers and a header to the sheet.
+        page_margin_cm (float): Margin from the page edges to the markers in centimeters.
+        dpi (int): Resolution in Dots Per Inch (DPI) for the output image.
+        add_text (bool): If True, adds ID numbers below each marker and a header to the sheet.
+
+    Raises:
+        ValueError: If an invalid `orientation` or `placement` strategy is provided,
+                    or if 'corners' placement is selected without exactly 4 marker IDs.
     """
     # --- 1. Define Page and Marker Dimensions in Pixels ---
     A4_IN_PORTRAIT = (8.27, 11.69)

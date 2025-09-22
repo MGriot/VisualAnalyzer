@@ -1,3 +1,12 @@
+"""
+This module provides the `ColorCorrector` class, which is responsible for
+performing color correction on images using color checker detection.
+
+It leverages YOLO for initial patch detection and falls back to OpenCV-based
+methods if YOLO detection is insufficient. It calculates a 3x3 color correction
+matrix and applies it to images.
+"""
+
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -9,25 +18,30 @@ from src.utils.image_utils import load_image
 class ColorCorrector:
     """
     Handles color correction and alignment using a color checker.
+
+    This class provides methods to detect color checker patches in an image,
+    calculate average colors from these patches, compute a 3x3 color correction
+    matrix, and apply this matrix to correct the colors of an image.
     """
 
     def __init__(self):
         """
-        Initializes the ColorCorrector by loading the YOLO model.
+        Initializes the ColorCorrector by loading the YOLO model for color checker detection.
         """
         self.model = YOLO(str(config.YOLO_MODEL_PATH))
 
     def detect_color_checker_patches(self, image: np.ndarray, debug_mode: bool = False) -> List[np.ndarray]:
         """
-        Detects color checker patches in an image using the YOLO model.
-        If YOLO doesn't find enough patches, it falls back to an OpenCV-based method.
+        Detects color checker patches in an image using a YOLO model, with an OpenCV-based
+        fallback for robustness.
 
         Args:
-            image (np.ndarray): The input image (BGR format).
-            debug_mode (bool): If True, prints debug information.
+            image (np.ndarray): The input image (BGR format) in which to detect patches.
+            debug_mode (bool): If True, prints debug information to the console.
 
         Returns:
-            List[np.ndarray]: A list of detected color patch images.
+            List[np.ndarray]: A list of detected color patch images (cropped NumPy arrays).
+                              Returns an empty list if no patches are detected.
         """
         # Try YOLO detection first
         yolo_patches = []
@@ -50,14 +64,20 @@ class ColorCorrector:
 
     def _detect_patches_opencv(self, image: np.ndarray, debug_mode: bool = False) -> List[np.ndarray]:
         """
-        Detects color checker patches in an image using OpenCV image processing techniques.
+        Detects color checker patches in an image using traditional OpenCV image processing
+        techniques (thresholding, contour detection, and grid assumption).
+
+        This method is used as a fallback when YOLO detection is insufficient.
+        It assumes a standard 6x4 ColorChecker Classic layout.
 
         Args:
             image (np.ndarray): The input image (BGR format).
-            debug_mode (bool): If True, prints debug information.
+            debug_mode (bool): If True, prints debug information to the console.
 
         Returns:
-            List[np.ndarray]: A list of detected color patch images, sorted by position.
+            List[np.ndarray]: A list of detected color patch images (cropped NumPy arrays),
+                              sorted by their assumed grid position. Returns an empty list
+                              if no significant contours are found or cropping fails.
         """
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         # Invert the image to make borders white and patches dark
@@ -108,14 +128,19 @@ class ColorCorrector:
 
     def calculate_average_color(self, patches: List[np.ndarray], debug_mode: bool = False) -> List[np.ndarray]:
         """
-        Calculates the average color of each patch.
+        Calculates the average BGR color for each provided image patch.
+
+        If a patch has an alpha channel, only non-transparent pixels are considered
+        for the average calculation.
 
         Args:
-            patches (List[np.ndarray]): A list of color patch images.
-            debug_mode (bool): If True, prints debug information.
+            patches (List[np.ndarray]): A list of image patches (NumPy arrays).
+            debug_mode (bool): If True, prints debug information including the calculated
+                               average colors.
 
         Returns:
-            List[np.ndarray]: A list of average BGR colors for each patch.
+            List[np.ndarray]: A list of NumPy arrays, where each array represents the
+                              [B, G, R] average color of a corresponding patch.
         """
         average_colors = []
         for patch in patches:
@@ -138,15 +163,21 @@ class ColorCorrector:
 
     def calculate_color_correction_matrix(self, source_colors: List[np.ndarray], target_colors: List[np.ndarray], debug_mode: bool = False) -> np.ndarray:
         """
-        Calculates a 3x3 color correction matrix using least squares.
+        Calculates a 3x3 color correction matrix that transforms `source_colors` to `target_colors`
+        using a least squares approach.
 
         Args:
-            source_colors (List[np.ndarray]): List of average BGR colors from the source image.
-            target_colors (List[np.ndarray]): List of average BGR colors from the target image.
-            debug_mode (bool): If True, prints debug information.
+            source_colors (List[np.ndarray]): A list of average BGR colors from the source image.
+            target_colors (List[np.ndarray]): A list of average BGR colors from the target (reference) image.
+            debug_mode (bool): If True, prints the calculated correction matrix.
 
         Returns:
-            np.ndarray: A 3x3 color correction matrix.
+            np.ndarray: A 3x3 NumPy array representing the color correction matrix.
+                        Returns an identity matrix if the calculation fails.
+
+        Raises:
+            ValueError: If there are fewer than 3 color pairs, or if the number of
+                        source and target colors do not match.
         """
         if len(source_colors) < 3 or len(target_colors) < 3:
             if debug_mode: print("[DEBUG] Not enough color pairs to calculate a 3x3 matrix.")
@@ -171,14 +202,19 @@ class ColorCorrector:
 
     def apply_color_correction(self, image: np.ndarray, correction_matrix: np.ndarray) -> np.ndarray:
         """
-        Applies the color correction matrix to an image.
+        Applies a given 3x3 color correction matrix to an input image.
+
+        The image pixels are reshaped, transformed by the matrix, and then clipped
+        to ensure valid BGR color ranges (0-255).
 
         Args:
-            image (np.ndarray): The input image (BGR format).
-            correction_matrix (np.ndarray): The 3x3 color correction matrix.
+            image (np.ndarray): The input image (BGR format) to which the correction
+                                will be applied.
+            correction_matrix (np.ndarray): The 3x3 NumPy array representing the color
+                                            correction transformation.
 
         Returns:
-            np.ndarray: The color-corrected image.
+            np.ndarray: The color-corrected image in BGR format.
         """
         # Reshape image to a 2D array of pixels (height*width, 3)
         original_shape = image.shape
@@ -197,15 +233,28 @@ class ColorCorrector:
 
     def correct_image_colors(self, source_image_path: str, reference_image_path: str, debug_mode: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Performs full color correction from a source image to a reference image.
+        Performs a complete color correction workflow from a source image (e.g., a photo
+        of a color checker taken under specific lighting) to a reference image (e.g.,
+        an ideal representation of the same color checker).
+
+        This involves detecting patches in both images, calculating their average colors,
+        and then computing a color correction matrix to transform colors from the source
+        lighting conditions to the reference conditions.
 
         Args:
-            source_image_path (str): Path to the source image (e.g., user's color checker).
-            reference_image_path (str): Path to the reference color checker image.
-            debug_mode (bool): If True, prints debug information.
+            source_image_path (str): Path to the source image containing a color checker.
+            reference_image_path (str): Path to the reference image of the same color checker.
+            debug_mode (bool): If True, enables verbose output during the process.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: The original source image and the color correction matrix.
+            Tuple[np.ndarray, np.ndarray]: A tuple containing:
+                - source_image (np.ndarray): The loaded source image.
+                - correction_matrix (np.ndarray): The calculated 3x3 color correction matrix.
+
+        Raises:
+            ValueError: If either image cannot be loaded, if color checker patches cannot
+                        be detected in one or both images, or if an insufficient number
+                        of matching patches are found for matrix calculation.
         """
         source_image, _ = load_image(source_image_path)
         reference_image, _ = load_image(reference_image_path)

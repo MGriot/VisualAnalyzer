@@ -1,3 +1,12 @@
+"""
+This module defines the `ProjectManager` class, responsible for handling project-specific
+configurations, file paths, and cached analysis data within the Visual Analyzer application.
+
+It provides functionalities to list projects, retrieve project and dataset item processing
+configurations, and calculate HSV color ranges and color correction matrices, with caching
+mechanisms to optimize performance.
+"""
+
 import os
 import cv2
 import numpy as np
@@ -16,14 +25,18 @@ from src.config_models import ProjectConfig, DatasetItemProcessingConfig
 
 class ProjectManager:
     """
-    Manages projects, including listing available projects, providing paths to
-    reference color checkers and dataset images, and calculating average HSV colors.
-    Also handles caching of calculated color correction matrices and HSV ranges.
+    Manages Visual Analyzer projects, including listing available projects,
+    providing paths to reference color checkers and dataset images, and
+    calculating average HSV colors. It also handles caching of calculated
+    color correction matrices and HSV ranges to improve performance.
     """
 
     def __init__(self):
         """
         Initializes the ProjectManager.
+
+        Sets up paths to project roots, initializes `ColorCorrector` and
+        `DatasetItemProcessor` instances, and creates a cache directory.
         """
         self.projects_root = config.PROJECTS_DIR
         self.color_corrector = ColorCorrector()
@@ -33,33 +46,45 @@ class ProjectManager:
 
     def _get_cache_file_path(self, project_name: str) -> Path:
         """
-        Returns the path to the cache file for a given project.
+        Constructs the file path for the cache file associated with a given project.
+
+        Args:
+            project_name (str): The name of the project.
+
+        Returns:
+            Path: The absolute path to the project's cache file.
         """
         return self.cache_dir / f"{project_name}_cache.json"
 
     def list_projects(self) -> List[str]:
         """
-        Lists all available project names.
+        Lists the names of all available projects located in the configured projects root directory.
 
         Returns:
-            List[str]: A list of project names.
+            List[str]: A list of strings, where each string is the name of a project.
+                       Returns an empty list if the projects root directory does not exist
+                       or contains no subdirectories.
         """
         if not self.projects_root.exists():
             return []
         return [d.name for d in self.projects_root.iterdir() if d.is_dir()]
 
     def _get_project_config(self, project_name: str) -> ProjectConfig:
-        """
-        Reads and validates the project's configuration file.
-        """
         project_path = self.projects_root / project_name
         config_file_path = project_path / "project_config.json"
         if not config_file_path.is_file():
             raise FileNotFoundError(f"Configuration file 'project_config.json' not found for project '{project_name}'.")
 
-        with open(config_file_path, 'r') as f:
-            config_data = json.load(f)
-        
+        # More robust file reading
+        config_data = {}
+        try:
+            with open(config_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if content.strip():
+                    config_data = json.loads(content)
+        except (IOError, json.JSONDecodeError) as e:
+            raise ValueError(f"Could not read or parse project_config.json for '{project_name}': {e}")
+
         try:
             return ProjectConfig(**config_data)
         except ValidationError as e:
@@ -67,7 +92,18 @@ class ProjectManager:
 
     def _get_dataset_item_processing_config(self, project_name: str) -> DatasetItemProcessingConfig:
         """
-        Reads and validates the dataset item processing configuration file for a project.
+        Reads and validates the `dataset_item_processing_config.json` file for a specified project.
+
+        Args:
+            project_name (str): The name of the project.
+
+        Returns:
+            DatasetItemProcessingConfig: An instance of `DatasetItemProcessingConfig` containing
+                                         the validated configuration data. If the file is not found,
+                                         an empty configuration is returned.
+
+        Raises:
+            ValueError: If the configuration data fails Pydantic validation.
         """
         project_path = self.projects_root / project_name
         config_file_path = project_path / "dataset_item_processing_config.json"
@@ -76,29 +112,18 @@ class ProjectManager:
 
         with open(config_file_path, 'r') as f:
             config_data = json.load(f)
-            
+
         try:
-            return DatasetItemProcessingConfig(**config_data)
+            obj = DatasetItemProcessingConfig(**config_data)
+            print(f"--- Debugging DatasetItemProcessingConfig ---")
+            print(f"Type of returned object: {type(obj)}")
+            print(f"Attributes of returned object: {dir(obj)}")
+            print(f"-------------------------------------------")
+            return obj
         except ValidationError as e:
             raise ValueError(f"Invalid dataset item processing configuration for '{project_name}':\n{e}")
 
-
     def get_project_file_paths(self, project_name: str, debug_mode: bool = False) -> Dict[str, Path | List[Path] | List[Dict]]:
-        """
-        Gets the file paths for a given project based on its configuration.
-
-        Args:
-            project_name (str): The name of the project.
-            debug_mode (bool): If True, prints debug information.
-
-        Returns:
-            Dict[str, Path | List[Path] | List[Dict]]: A dictionary containing paths to the reference color checker,
-                                          color checker images for project calibration, and dataset image configurations.
-
-        Raises:
-            ValueError: If the project or its configuration file does not exist.
-            FileNotFoundError: If specified files within the project are not found.
-        """
         project_path = self.projects_root / project_name
         if not project_path.is_dir():
             raise ValueError(f"Project '{project_name}' not found.")
@@ -106,25 +131,28 @@ class ProjectManager:
         config_data = self._get_project_config(project_name)
         dataset_item_processing_config = self._get_dataset_item_processing_config(project_name)
 
-        ref_color_checker_rel_path = config_data.reference_color_checker_path
-        colorchecker_ref_for_project_relative = config_data.colorchecker_reference_for_project
-        technical_drawing_rel_path_layer_1 = config_data.technical_drawing_path_layer_1
-        technical_drawing_rel_path_layer_2 = config_data.technical_drawing_path_layer_2
-        technical_drawing_rel_path_layer_3 = config_data.technical_drawing_path_layer_3
-        aruco_ref_rel_path = config_data.aruco_reference_path
-        training_rel_path = config_data.training_path
-        object_reference_rel_path = config_data.object_reference_path
+        ref_color_checker_rel_path = getattr(config_data, 'reference_color_checker_path', None)
+        colorchecker_ref_for_project_relative = getattr(config_data, 'colorchecker_reference_for_project', [])
+        technical_drawing_rel_path_layer_1 = getattr(config_data, 'technical_drawing_path_layer_1', None)
+        technical_drawing_rel_path_layer_2 = getattr(config_data, 'technical_drawing_path_layer_2', None)
+        technical_drawing_rel_path_layer_3 = getattr(config_data, 'technical_drawing_path_layer_3', None)
+        aruco_ref_rel_path = getattr(config_data, 'aruco_reference_path', None)
+        training_rel_path = getattr(config_data, 'training_path', None)
+        object_reference_rel_path = getattr(config_data, 'object_reference_path', None)
         
-        # New: ArUco alignment configuration
-        aruco_marker_map = config_data.aruco_marker_map
-        aruco_output_size = config_data.aruco_output_size
+        aruco_marker_map = getattr(config_data, 'aruco_marker_map', {})
+        aruco_output_size = getattr(config_data, 'aruco_output_size', [1000, 1000])
 
         if not ref_color_checker_rel_path:
-            raise ValueError(f"'reference_color_checker_path' not specified in project_config.json for project '{project_name}'.")
-
-        ref_color_checker_path = project_path / ref_color_checker_rel_path if ref_color_checker_rel_path else None
-        if ref_color_checker_path and not ref_color_checker_path.is_file():
-            raise FileNotFoundError(f"Reference color checker file not found at '{ref_color_checker_path}'.")
+            if debug_mode:
+                print(f"[DEBUG] 'reference_color_checker_path' not specified in project_config.json for project '{project_name}'.")
+            ref_color_checker_path = None
+        else:
+            ref_color_checker_path = project_path / ref_color_checker_rel_path
+            if not ref_color_checker_path.is_file():
+                if debug_mode:
+                    print(f"[DEBUG] Reference color checker file not found at '{ref_color_checker_path}'.")
+                ref_color_checker_path = None
 
         technical_drawing_path_layer_1 = project_path / technical_drawing_rel_path_layer_1 if technical_drawing_rel_path_layer_1 else None
         if technical_drawing_path_layer_1 and not technical_drawing_path_layer_1.is_file():
@@ -159,20 +187,15 @@ class ProjectManager:
         if object_ref_path and not object_ref_path.is_file():
             if debug_mode: print(f"[DEBUG] Warning: Object reference file not found at '{object_ref_path}'.")
             object_ref_path = None
-        if object_ref_path and not object_ref_path.is_file():
-            if debug_mode: print(f"[DEBUG] Warning: Object reference file not found at '{object_ref_path}'.")
-            object_ref_path = None
-        if object_ref_path and not object_ref_path.is_file():
-            if debug_mode: print(f"[DEBUG] Warning: Object reference file not found at '{object_ref_path}'.")
-            object_ref_path = None
 
         training_image_configs = []
         if training_rel_path:
             training_path = project_path / training_rel_path
-            if training_path.is_dir():
+            if not training_path.is_dir():
+                if debug_mode: print(f"[ERROR] The specified training path is not a valid directory: {training_path}")
+            else:
                 for item in training_path.iterdir():
                     if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                        # Check if there's a specific config for this image
                         img_config = next((cfg for cfg in dataset_item_processing_config.image_configs if cfg.filename == item.name), None)
                         if img_config:
                             method = img_config.method
@@ -180,11 +203,10 @@ class ProjectManager:
                             if method == "points" and not points:
                                 method = "full_average"
                             points_as_dicts = [p.model_dump() for p in points] if points else None
-                            training_image_configs.append({"path": item, "method": method, "points": points_as_dicts})
+                            training_image_configs.append({"filename": item.name, "path": str(item), "method": method, "points": points_as_dicts})
                         else:
-                            training_image_configs.append({"path": item, "method": "full_average"})
+                            training_image_configs.append({"filename": item.name, "path": str(item), "method": "full_average"})
 
-        # Dynamically discover dataset images from the 'dataset' folder
         dataset_image_configs = []
         dataset_path = project_path / "dataset"
 
@@ -193,7 +215,6 @@ class ProjectManager:
         if dataset_path.is_dir():
             for item in dataset_path.iterdir():
                 if item.is_file() and item.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                    # Check if there's a specific config for this image
                     img_config = next((cfg for cfg in dataset_item_processing_config.image_configs if cfg.filename == item.name), None)
                     if img_config:
                         method = img_config.method
@@ -201,9 +222,9 @@ class ProjectManager:
                         if method == "points" and not points:
                             method = "full_average"
                         points_as_dicts = [p.model_dump() for p in points] if points else None
-                        dataset_image_configs.append({"path": item, "method": method, "points": points_as_dicts})
+                        dataset_image_configs.append({"filename": item.name, "path": item, "method": method, "points": points_as_dicts})
                     else:
-                        dataset_image_configs.append({"path": item, "method": "full_average"})
+                        dataset_image_configs.append({"filename": item.name, "path": item, "method": "full_average"})
 
         if not dataset_image_configs:
             if debug_mode: print(f"[DEBUG] Warning: No valid dataset images found for project '{project_name}'.")
@@ -234,20 +255,32 @@ class ProjectManager:
             "technical_drawing_layer_3": technical_drawing_path_layer_3,
             "aruco_reference": aruco_ref_path,
             "object_reference_path": object_ref_path,
-            "aruco_marker_map": aruco_marker_map, # New
-            "aruco_output_size": aruco_output_size # New
+            "aruco_marker_map": aruco_marker_map,
+            "aruco_output_size": aruco_output_size
         }
 
     def get_hsv_colors_from_dataset(self, dataset_image_configs: List[Dict], debug_mode: bool = False) -> np.ndarray:
         """
-        Extracts all HSV colors from a list of dataset image configurations.
+        Extracts all HSV color values from a list of dataset image configurations.
+
+        This method iterates through the provided image configurations, applying either
+        full image average extraction or point-based extraction as specified, and
+        collects all extracted HSV colors into a single NumPy array.
 
         Args:
-            dataset_image_configs (List[Dict]): A list of dictionaries, each containing 'path', 'method', and 'points' (if applicable).
+            dataset_image_configs (List[Dict]): A list of dictionaries, each containing
+                                               'path' (Path to image), 'method' (e.g.,
+                                               "full_average", "points"), and optionally
+                                               'points' (List of point dictionaries).
             debug_mode (bool): If True, prints debug information.
 
         Returns:
-            np.ndarray: A numpy array of all extracted HSV colors.
+            np.ndarray: A NumPy array of shape (N, 3) containing all extracted HSV colors,
+                        where N is the total number of pixels/points extracted.
+
+        Raises:
+            ValueError: If no dataset image configurations are provided, or if no valid
+                        HSV colors could be extracted from the configured images.
         """
         all_hsv_colors = []
 
@@ -286,17 +319,37 @@ class ProjectManager:
 
     def calculate_hsv_range_from_dataset(self, dataset_image_configs: List[Dict], debug_mode: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]:
         """
-        Calculates the HSV color range (lower, upper, center) from a list of dataset image configurations.
-        This method computes a bounding box around the average colors of the dataset images or points.
+        Calculates a robust HSV color range (lower bound, upper bound, and center color)
+        from a collection of dataset image configurations.
+
+        This method processes each image configuration to extract HSV colors, then uses
+        statistical methods (interquartile range) to determine a robust bounding box
+        for the HSV values, mitigating the effect of outliers.
 
         Args:
-            dataset_image_configs (List[Dict]): A list of dictionaries, each containing 'path', 'method', and 'points' (if applicable).
-            debug_mode (bool): If True, prints debug information.
+            dataset_image_configs (List[Dict]): A list of dictionaries, each containing
+                                               'path' (Path to image), 'method' (e.g.,
+                                               "full_average", "points"), and optionally
+                                               'points' (List of point dictionaries).
+            debug_mode (bool): If True, prints debug information and collects detailed
+                               debug info for each processed sample.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]: A tuple containing the lower HSV limit,
-                                                                  upper HSV limit, the center HSV color,
-                                                                  and a list of dictionaries with debug info for each sample.
+            Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]: A tuple containing:
+                - lower_limit (np.ndarray): A NumPy array [H, S, V] representing the
+                                            lower bounds of the calculated HSV range.
+                - upper_limit (np.ndarray): A NumPy array [H, S, V] representing the
+                                            upper bounds of the calculated HSV range.
+                - center_color (np.ndarray): A NumPy array [H, S, V] representing the
+                                             mean HSV color of the dataset.
+                - dataset_debug_info (List[Dict]): A list of dictionaries, each containing
+                                                   detailed information about how each
+                                                   sample image was processed and its
+                                                   extracted colors (useful for reporting).
+
+        Raises:
+            ValueError: If no dataset image configurations are provided, or if no valid
+                        HSV colors could be extracted from the configured images.
         """
         all_hsv_colors = []
         dataset_debug_info = []
@@ -310,7 +363,7 @@ class ProjectManager:
             dataset_item_file_path = img_config['path']
             method = img_config['method']
             points = img_config.get('points')
-            
+
             try:
                 hsv_colors_for_sample = []
                 bgr_colors_for_sample = []
@@ -360,12 +413,12 @@ class ProjectManager:
             q1 = np.percentile(values, 25)
             q3 = np.percentile(values, 75)
             iqr = q3 - q1
-            
+
             lower_bound = q1 - 1.5 * iqr
             upper_bound = q3 + 1.5 * iqr
-            
+
             filtered_values = values[(values >= lower_bound) & (values <= upper_bound)]
-            
+
             if len(filtered_values) == 0:
                 final_lower = np.min(values)
                 final_upper = np.max(values)
@@ -378,7 +431,7 @@ class ProjectManager:
         lower_h, upper_h = get_robust_range(h_values)
         lower_s, upper_s = get_robust_range(s_values)
         lower_v, upper_v = get_robust_range(v_values)
-        
+
         center_h, center_s, center_v = np.mean(h_values), np.mean(s_values), np.mean(v_values)
 
         lower_limit = np.array([lower_h, lower_s, lower_v], dtype=np.uint8)
@@ -392,11 +445,26 @@ class ProjectManager:
 
     def get_project_data(self, project_name: str, debug_mode: bool = False) -> Dict[str, any]:
         """
-        Calculates and caches the color correction matrix and HSV range for a project.
-        Recalculates if source files have changed.
+        Retrieves or calculates the essential data for a project, including the color
+        correction matrix and the HSV color range for analysis.
+
+        This method implements a caching mechanism: if the data has been previously
+        calculated and the source files (project config, dataset images, color checkers)
+        have not changed, the cached data is returned. Otherwise, the data is recalculated
+        and then cached.
+
+        Args:
+            project_name (str): The name of the project.
+            debug_mode (bool): If True, enables verbose output for debugging and caching details.
 
         Returns:
-            Dict[str, any]: Contains 'correction_matrix', 'lower_hsv', 'upper_hsv', 'center_hsv'.
+            Dict[str, any]: A dictionary containing:
+                - 'correction_matrix' (np.ndarray): A 3x3 color correction matrix.
+                - 'lower_hsv' (np.ndarray): The lower bounds of the calculated HSV range.
+                - 'upper_hsv' (np.ndarray): The upper bounds of the calculated HSV range.
+                - 'center_hsv' (np.ndarray): The center HSV color of the dataset.
+                - 'dataset_debug_info' (List[Dict]): Debug information about the dataset
+                                                      used for HSV range calculation.
         """
         cache_file_path = self._get_cache_file_path(project_name)
         cached_data = None
@@ -418,7 +486,7 @@ class ProjectManager:
             try:
                 with open(cache_file_path, 'r') as f:
                     loaded_cache = json.load(f)
-                
+
                 # Deserialize NumPy arrays
                 correction_matrix_list = loaded_cache['data']['correction_matrix']
                 loaded_cache['data']['correction_matrix'] = np.array(correction_matrix_list, dtype=np.float32)
@@ -447,7 +515,7 @@ class ProjectManager:
                             is_cache_valid = False
                             if debug_mode: print(f"[DEBUG]   Cache invalidated for {file_path_str} (modified).")
                             break
-                
+
                 if is_cache_valid:
                     if debug_mode: print(f"[DEBUG] Using cached data for project '{project_name}'.")
                     return cached_data
@@ -498,12 +566,12 @@ class ProjectManager:
             'center_hsv': center_hsv.tolist(),
             'dataset_debug_info': dataset_debug_info,
         }
-        
+
         full_cache_entry = {
             'data': cached_data_to_save,
             'source_file_timestamps': source_file_timestamps,
         }
-        
+
         with open(cache_file_path, 'w') as f:
             json.dump(full_cache_entry, f, indent=4)
         if debug_mode: print(f"[DEBUG] Cached data saved to {cache_file_path}")

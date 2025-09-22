@@ -1,4 +1,9 @@
-# color_check_generator.py
+"""
+This module provides functions for generating various types of color check images.
+
+These images can be used for display calibration, color correction, and testing
+color reproduction accuracy of cameras and displays.
+"""
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -7,17 +12,18 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 def generate_simple_color_check(
-    width=1748, height=2480, filename="simple_color_check.png"
+    width: int = 1748, height: int = 2480, filename: str = "simple_color_check.png"
 ):
     """
     Generates a simple color check image with primary and secondary colors.
 
-    The default dimensions are for an A5 paper at 300 DPI.
+    The image consists of a grid of color patches, each labeled with its color name.
+    Default dimensions are set for A5 paper at 300 DPI.
 
     Args:
-        width (int): The width of the image in pixels.
-        height (int): The height of the image in pixels.
-        filename (str): The name of the file to save the image as.
+        width (int): The width of the image in pixels. Defaults to 1748.
+        height (int): The height of the image in pixels. Defaults to 2480.
+        filename (str): The name of the file to save the image as. Defaults to "simple_color_check.png".
     """
     # Define the primary and secondary colors, plus white
     colors = {
@@ -76,16 +82,19 @@ def generate_simple_color_check(
     print(f"Simple color check image saved as {filename}")
 
 
-def generate_16_color_check(width=1748, height=2480, filename="16_color_check.png"):
+def generate_16_color_check(
+    width: int = 1748, height: int = 2480, filename: str = "16_color_check.png"
+):
     """
-    Generates a color check image with 16 distinct colors in a 4x4 grid.
+    Generates a color check image with 16 distinct colors arranged in a 4x4 grid.
 
-    The default dimensions are for an A5 paper at 300 DPI.
+    Each color patch is labeled with its name, and text color is adjusted for contrast.
+    Default dimensions are set for A5 paper at 300 DPI.
 
     Args:
-        width (int): The width of the image in pixels.
-        height (int): The height of the image in pixels.
-        filename (str): The name of the file to save the image as.
+        width (int): The width of the image in pixels. Defaults to 1748.
+        height (int): The height of the image in pixels. Defaults to 2480.
+        filename (str): The name of the file to save the image as. Defaults to "16_color_check.png".
     """
     # Define a palette of 16 colors
     colors = {
@@ -156,7 +165,7 @@ def generate_16_color_check(width=1748, height=2480, filename="16_color_check.pn
 
 
 def generate_comprehensive_color_check(
-    width=1748, height=2480, filename="comprehensive_color_check.png"
+    width: int = 1748, height: int = 2480, filename: str = "comprehensive_color_check.png"
 ):
     """
     Generates a comprehensive color check image with multiple sections:
@@ -165,12 +174,12 @@ def generate_comprehensive_color_check(
     - A palette of common named colors
     - Three smooth color gradients
 
-    The default dimensions are for an A5 paper at 300 DPI.
+    Default dimensions are set for A5 paper at 300 DPI.
 
     Args:
-        width (int): The width of the image in pixels.
-        height (int): The height of the image in pixels.
-        filename (str): The name of the file to save the image as.
+        width (int): The width of the image in pixels. Defaults to 1748.
+        height (int): The height of the image in pixels. Defaults to 2480.
+        filename (str): The name of the file to save the image as. Defaults to "comprehensive_color_check.png".
     """
     # Create a new black image
     img = Image.new("RGB", (width, height), "black")

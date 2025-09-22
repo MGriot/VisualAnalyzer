@@ -1,7 +1,0 @@
-{
-    "reference_color_checker_path": "dataset/colorchecker/chessboard.png",
-    "colorchecker_reference_for_project": [
-        "dataset/colorchecker/chessboard.png"
-    ],
-    "technical_drawing_path": "drawing.png"
-}

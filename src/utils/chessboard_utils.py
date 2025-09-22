@@ -1,16 +1,29 @@
+"""
+This module provides utility functions for generating chessboard patterns.
+
+These patterns are commonly used in camera calibration for detecting corners
+and estimating camera intrinsic and extrinsic parameters.
+"""
+
 import cv2
 import numpy as np
 import os
 
-def generate_chessboard_image(pattern_size=(9, 6), square_size_px=50, padding=100, output_path="chessboard.png"):
+def generate_chessboard_image(pattern_size: tuple = (9, 6), square_size_px: int = 50, padding: int = 100, output_path: str = "chessboard.png") -> np.ndarray:
     """
-    Generates and saves a chessboard image.
+    Generates and saves a chessboard image with specified dimensions and properties.
 
     Args:
-        pattern_size (tuple): The number of inner corners in the grid pattern (width, height).
-        square_size_px (int): The size of each square in pixels.
-        padding (int): Padding around the chessboard.
-        output_path (str): The path to save the generated chessboard image.
+        pattern_size (tuple): A tuple (width, height) representing the number of
+                              inner corners in the grid pattern. Defaults to (9, 6).
+        square_size_px (int): The size of each square in pixels. Defaults to 50.
+        padding (int): The amount of white padding around the chessboard in pixels.
+                       Defaults to 100.
+        output_path (str): The file path where the generated chessboard image will be saved.
+                           Defaults to "chessboard.png".
+
+    Returns:
+        np.ndarray: The generated chessboard image as a NumPy array.
     """
     board_width = pattern_size[0] + 1
     board_height = pattern_size[1] + 1

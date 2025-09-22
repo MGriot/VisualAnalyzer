@@ -1,3 +1,11 @@
+"""
+This module provides the `AdvancedAligner` class for robust image alignment
+using various computer vision techniques.
+
+It supports feature-based alignment (ORB/SIFT), ECC (Enhanced Correlation Coefficient)
+maximization, contour centroid alignment, and polygon-based alignment.
+"""
+
 import cv2
 import numpy as np
 
@@ -6,6 +14,13 @@ import numpy as np
 
 
 class AdvancedAligner:
+    """
+    A comprehensive image aligner class offering various alignment methods.
+
+    This class provides tools for image preprocessing, feature detection,
+    and different alignment strategies including feature matching (ORB/SIFT),
+    ECC, contour centroid, and polygon-based alignment.
+    """
     def __init__(
         self,
         max_features=2000,
@@ -19,14 +34,27 @@ class AdvancedAligner:
         corner_method="shi-tomasi",
     ):
         """
-        max_features: max keypoints for ORB/SIFT
-        good_match_percent: fraction of good feature matches to keep
-        motion_model: 'affine', 'euclidean', 'homography' for geometric transforms
-        ecc_iters, ecc_eps: ECC algorithm convergence parameters
-        min_contour_area: filter small contours
-        poly_epsilon_ratio: approximation precision for polygon simplification
-        edge_method: edge detection method ('canny', 'sobel', 'laplacian')
-        corner_method: corner detection technique ('shi-tomasi', 'harris')
+        Initializes the AdvancedAligner with various configuration parameters.
+
+        Args:
+            max_features (int, optional): Maximum number of keypoints for feature detectors (ORB/SIFT).
+                                          Defaults to 2000.
+            good_match_percent (float, optional): Fraction of good feature matches to keep for alignment.
+                                                  Defaults to 0.15.
+            motion_model (str, optional): Type of geometric transform to use ('affine', 'euclidean', 'homography').
+                                          Defaults to "affine".
+            ecc_iters (int, optional): Number of iterations for the ECC algorithm.
+                                       Defaults to 5000.
+            ecc_eps (float, optional): Epsilon for ECC algorithm convergence.
+                                       Defaults to 1e-8.
+            min_contour_area (int, optional): Minimum contour area to consider for contour-based methods.
+                                              Defaults to 100.
+            poly_epsilon_ratio (float, optional): Approximation precision for polygon simplification.
+                                                  Defaults to 0.02.
+            edge_method (str, optional): Edge detection method ('canny', 'sobel', 'laplacian').
+                                         Defaults to "canny".
+            corner_method (str, optional): Corner detection technique ('shi-tomasi', 'harris').
+                                           Defaults to "shi-tomasi".
         """
         self.max_features = max_features
         self.good_match_percent = good_match_percent
@@ -49,11 +77,26 @@ class AdvancedAligner:
             self.sift = None
 
     def preprocess_gray(self, img):
-        return (
-            cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img.copy()
-        )
+        """
+        Converts an input image to grayscale if it's a color image, otherwise returns a copy.
+
+        Args:
+            img (np.ndarray): The input image (BGR or grayscale).
+
+        Returns:
+            np.ndarray: The grayscale version of the image.
+        """
 
     def detect_edges(self, gray):
+        """
+        Detects edges in a grayscale image using the configured edge detection method.
+
+        Args:
+            gray (np.ndarray): The input grayscale image.
+
+        Returns:
+            np.ndarray: A binary image with detected edges.
+        """
         if self.edge_method == "canny":
             edges = cv2.Canny(gray, 50, 150)
         elif self.edge_method == "sobel":
@@ -68,6 +111,15 @@ class AdvancedAligner:
         return edges
 
     def find_polygons(self, edges):
+        """
+        Finds contours in an edge image and approximates them as polygons.
+
+        Args:
+            edges (np.ndarray): A binary image containing edges.
+
+        Returns:
+            List[np.ndarray]: A list of approximated polygonal contours.
+        """
         contours, _ = cv2.findContours(
             edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
@@ -80,6 +132,15 @@ class AdvancedAligner:
         return polys
 
     def extract_corners(self, gray):
+        """
+        Extracts corners from a grayscale image using the configured corner detection method.
+
+        Args:
+            gray (np.ndarray): The input grayscale image.
+
+        Returns:
+            np.ndarray: An array of detected corner coordinates (x, y).
+        """
         if self.corner_method == "shi-tomasi":
             corners = cv2.goodFeaturesToTrack(
                 gray, maxCorners=50, qualityLevel=0.01, minDistance=10
@@ -94,14 +155,48 @@ class AdvancedAligner:
         return np.array([])
 
     def minimum_area_rectangle(self, contour):
+        """
+        Calculates the minimum area bounding rectangle for a given contour.
+
+        Args:
+            contour (np.ndarray): The input contour.
+
+        Returns:
+            Tuple[np.ndarray, tuple]: A tuple containing the 4 corner points of the rectangle
+                                     and the `RotatedRect` object.
+        """
         rect = cv2.minAreaRect(contour)
         box = cv2.boxPoints(rect)
         return np.int0(box), rect
 
     def convex_hull(self, contour):
+        """
+        Computes the convex hull of a point set or object contour.
+
+        Args:
+            contour (np.ndarray): The input contour.
+
+        Returns:
+            np.ndarray: The convex hull of the contour.
+        """
         return cv2.convexHull(contour)
 
     def align_by_feature(self, src, ref, use_sift=False):
+        """
+        Aligns a source image to a reference image using feature matching (ORB or SIFT).
+
+        Args:
+            src (np.ndarray): The source image to be aligned.
+            ref (np.ndarray): The reference image.
+            use_sift (bool, optional): If True, uses SIFT; otherwise, uses ORB. Defaults to False.
+
+        Returns:
+            np.ndarray: The aligned image.
+
+        Raises:
+            RuntimeError: If feature detector is not available, no descriptors are found,
+                          or not enough good matches are found.
+        """
         src_gray = self.preprocess_gray(src)
         ref_gray = self.preprocess_gray(ref)
         detector = self.sift if use_sift and self.sift is not None else self.orb
@@ -140,6 +235,21 @@ class AdvancedAligner:
         return aligned
 
     def align_by_ecc(self, src, ref):
+        """
+        Aligns a source image to a reference image using the Enhanced Correlation Coefficient (ECC) maximization algorithm.
+
+        This method first performs a rough alignment using feature matching, then refines it using ECC.
+
+        Args:
+            src (np.ndarray): The source image to be aligned.
+            ref (np.ndarray): The reference image.
+
+        Returns:
+            np.ndarray: The aligned image.
+
+        Raises:
+            RuntimeError: If initial feature-based alignment fails or ECC refinement encounters an error.
+        """
         # First, get a rough alignment using features
         aligned_src = self.align_by_feature(src, ref)
         if aligned_src is None:
@@ -197,6 +307,19 @@ class AdvancedAligner:
         return aligned
 
     def align_by_contour_centroid(self, src, ref):
+        """
+        Aligns a source image to a reference image by matching the centroids of their largest contours.
+
+        Args:
+            src (np.ndarray): The source image to be aligned.
+            ref (np.ndarray): The reference image.
+
+        Returns:
+            np.ndarray: The aligned image.
+
+        Raises:
+            RuntimeError: If no valid contours are found in either image.
+        """
         def largest_contour(img):
             gray = self.preprocess_gray(img)
             _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -227,7 +350,21 @@ class AdvancedAligner:
         return aligned
 
     def align_by_polygon(self, src, ref):
-        """Approximate contours to polygons, extract key vertices, compute affine."""
+        """
+        Aligns a source image to a reference image by approximating contours to polygons
+        and computing an affine transformation based on key vertices.
+
+        Args:
+            src (np.ndarray): The source image to be aligned.
+            ref (np.ndarray): The reference image.
+
+        Returns:
+            np.ndarray: The aligned image.
+
+        Raises:
+            RuntimeError: If polygons cannot be found or if there are not enough points
+                          for affine transformation.
+        """
 
         def largest_polygon(img):
             gray = self.preprocess_gray(img)
@@ -253,7 +390,23 @@ class AdvancedAligner:
         return aligned
 
     def align(self, src, ref, method="feature_orb"):
-        """Interface to select alignment method."""
+        """
+        Main alignment interface that dispatches to different alignment methods.
+
+        Args:
+            src (np.ndarray): The source image to be aligned.
+            ref (np.ndarray): The reference image.
+            method (str, optional): The alignment method to use. Options include:
+                                    'feature_orb', 'feature_sift', 'ecc',
+                                    'contour_centroid', 'polygon'.
+                                    Defaults to "feature_orb".
+
+        Returns:
+            np.ndarray or None: The aligned image, or None if alignment fails.
+
+        Raises:
+            ValueError: If an unknown alignment method is specified.
+        """
         try:
             if method == "feature_orb":
                 return self.align_by_feature(src, ref, use_sift=False)

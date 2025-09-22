@@ -1,3 +1,11 @@
+"""
+This module provides the `DatasetItemProcessor` class, which is responsible for
+extracting and calculating HSV color information from dataset images.
+
+It supports extracting colors from the entire image or from specific points/regions
+of interest, and can calculate HSV ranges based on these extracted values.
+"""
+
 import cv2
 import numpy as np
 from typing import List, Tuple, Dict
@@ -7,12 +15,28 @@ from src.utils.image_utils import load_image
 
 class DatasetItemProcessor:
     """
-    Processes dataset item images to calculate HSV color ranges based on full image average or specified points.
+    Processes dataset item images to calculate HSV color ranges based on full image
+    average or specified points.
+
+    This class provides methods to extract HSV color values from images, either
+    from the entire image or from defined regions of interest (ROIs) around points.
+    It also includes a method to calculate a basic HSV range from average values.
     """
 
     def calculate_hsv_from_full_image(self, image_path: Path) -> Tuple[float, float, float]:
         """
-        Calculates the average HSV color from the entire image.
+        Calculates the average HSV color from the entire image, considering only
+        non-transparent pixels if an alpha channel is present.
+
+        Args:
+            image_path (Path): The path to the image file.
+
+        Returns:
+            Tuple[float, float, float]: A tuple containing the average Hue, Saturation,
+                                       and Value components of the image.
+
+        Raises:
+            ValueError: If the image cannot be loaded or if no non-transparent pixels are found.
         """
         img, alpha = load_image(str(image_path), handle_transparency=True)
         if img is None:
@@ -36,9 +60,21 @@ class DatasetItemProcessor:
 
     def calculate_hsv_from_points(self, image_path: Path, points: List[Dict], radius: int = 7) -> List[Tuple[float, float, float]]:
         """
-        Calculates the average HSV color for the ROI of each specified point.
-        Each point is a dictionary with 'x', 'y', and optional 'radius'.
-        Returns a list of average HSV tuples, one for each point.
+        Calculates the average HSV color for the Region of Interest (ROI) around each specified point.
+
+        Args:
+            image_path (Path): The path to the image file.
+            points (List[Dict]): A list of dictionaries, where each dictionary represents a point
+                                 with 'x', 'y' coordinates and an optional 'radius'.
+            radius (int, optional): The default radius for the ROI around each point if not
+                                    specified in the point dictionary. Defaults to 7.
+
+        Returns:
+            List[Tuple[float, float, float]]: A list of tuples, where each tuple contains the
+                                              average (H, S, V) for the ROI of a corresponding point.
+
+        Raises:
+            ValueError: If the image cannot be loaded or if no valid pixels are found around any point.
         """
         img, alpha = load_image(str(image_path), handle_transparency=True)
         if img is None:
@@ -78,7 +114,18 @@ class DatasetItemProcessor:
 
     def extract_hsv_from_full_image(self, image_path: Path) -> np.ndarray:
         """
-        Extracts all HSV color from the entire image.
+        Extracts all HSV color values from the entire image, considering only
+        non-transparent pixels if an alpha channel is present.
+
+        Args:
+            image_path (Path): The path to the image file.
+
+        Returns:
+            np.ndarray: A NumPy array of shape (N, 3) containing all extracted HSV colors,
+                        where N is the number of non-transparent pixels.
+
+        Raises:
+            ValueError: If the image cannot be loaded or if no non-transparent pixels are found.
         """
         img, alpha = load_image(str(image_path), handle_transparency=True)
         if img is None:
@@ -98,7 +145,21 @@ class DatasetItemProcessor:
 
     def extract_hsv_from_points(self, image_path: Path, points: List[Dict], radius: int = 7) -> np.ndarray:
         """
-        Extracts all HSV colors from specified points within the image.
+        Extracts all HSV color values from the Regions of Interest (ROIs) around specified points.
+
+        Args:
+            image_path (Path): The path to the image file.
+            points (List[Dict]): A list of dictionaries, where each dictionary represents a point
+                                 with 'x', 'y' coordinates and an optional 'radius'.
+            radius (int, optional): The default radius for the ROI around each point if not
+                                    specified in the point dictionary. Defaults to 7.
+
+        Returns:
+            np.ndarray: A NumPy array of shape (N, 3) containing all extracted HSV colors
+                        from the ROIs, where N is the total number of pixels extracted.
+
+        Raises:
+            ValueError: If the image cannot be loaded or if no valid pixels are found around any point.
         """
         img, alpha = load_image(str(image_path), handle_transparency=True)
         if img is None:
@@ -136,7 +197,19 @@ class DatasetItemProcessor:
 
     def calculate_hsv_range(self, avg_h: float, avg_s: float, avg_v: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Calculates the HSV range (lower, upper, center) from average HSV values.
+        Calculates a simple HSV color range (lower, upper, and center) based on
+        given average HSV values and predefined tolerances.
+
+        Args:
+            avg_h (float): Average Hue value.
+            avg_s (float): Average Saturation value.
+            avg_v (float): Average Value (Brightness) value.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
+                - lower_limit (np.ndarray): NumPy array [H, S, V] for the lower bounds.
+                - upper_limit (np.ndarray): NumPy array [H, S, V] for the upper bounds.
+                - center_color (np.ndarray): NumPy array [H, S, V] for the center color.
         """
         h_tolerance = 10  # Degrees
         s_tolerance = 30  # Percentage
