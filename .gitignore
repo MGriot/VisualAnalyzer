@@ -79,3 +79,14 @@ data/projects/*/cache/
 output/
 
 *.zip
+
+#images
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tiff
+*.gif
+*.svg
+*.ico
+*.webp
