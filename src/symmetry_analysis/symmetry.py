@@ -38,7 +38,7 @@ class SymmetryAnalyzer:
         Initializes the SymmetryAnalyzer with an image to be analyzed.
 
         Args:
-            image (np.ndarray): The input image (BGR, BGRA, or grayscale) for symmetry analysis.
+            image (np.ndarray): The input image (ideally a binary mask) for symmetry analysis.
         """
         self.original_image = image
         self.results = {}
@@ -46,25 +46,34 @@ class SymmetryAnalyzer:
 
     def _preprocess_image(self):
         """
-        Preprocesses the input image for symmetry analysis.
+        Preprocesses the input binary mask for symmetry analysis.
 
-        Converts the image to grayscale and ensures its dimensions are even
-        by cropping if necessary. Also extracts or creates a mask.
+        It ensures the mask has even dimensions for analysis and correctly sets both
+        the processed image and the calculation mask to be the input mask.
         """
-        if len(self.original_image.shape) == 3 and self.original_image.shape[2] == 4:
-            self.gray_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGRA2GRAY)
-            self.mask = self.original_image[:, :, 3]
-        elif len(self.original_image.shape) == 3:
-            self.gray_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2GRAY)
-            self.mask = np.ones_like(self.gray_image) * 255
+        # The input 'image' is expected to be a 2D binary mask (0s and 255s).
+        if len(self.original_image.shape) != 2:
+            print("[WARNING] SymmetryAnalyzer received a color image instead of a binary mask. Converting to grayscale and thresholding.")
+            if len(self.original_image.shape) == 3 and self.original_image.shape[2] == 4:
+                gray = cv2.cvtColor(self.original_image, cv2.COLOR_BGRA2GRAY)
+            else:
+                gray = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2GRAY)
+            
+            _, binary_mask = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+            image_to_process = binary_mask
         else:
-            self.gray_image = self.original_image.copy()
-            self.mask = np.ones_like(self.gray_image) * 255
+            # Input is already a 2D image, assume it's the binary mask.
+            image_to_process = self.original_image.copy()
 
-        h, w = self.gray_image.shape
+        # Ensure dimensions are even for quadrant analysis
+        h, w = image_to_process.shape
         h, w = h - (h % 2), w - (w % 2)
-        self.processed_image = self.gray_image[0:h, 0:w]
-        self.mask = self.mask[0:h, 0:w]
+        
+        # The image to be processed for symmetry IS the mask itself.
+        self.processed_image = image_to_process[0:h, 0:w]
+        
+        # The mask for similarity calculations is also the same mask.
+        self.mask = self.processed_image
 
     def _calculate_similarity(self, part1: np.ndarray, part2: np.ndarray, mask: np.ndarray = None) -> float:
         """

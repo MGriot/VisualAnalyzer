@@ -7,9 +7,9 @@ from pathlib import Path
 import sys
 
 # Add src to path to allow for imports from the src directory
-sys.path.append(str(Path(__file__).resolve().parent / 'src'))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from reporting.generator import ReportGenerator
+from src.reporting.generator import ReportGenerator
 
 def regenerate_report_from_archive(archive_path: Path):
     """

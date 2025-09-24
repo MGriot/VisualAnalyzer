@@ -3,9 +3,9 @@ from pathlib import Path
 import sys
 
 # Add src to path to allow for imports from the src directory
-sys.path.append(str(Path(__file__).resolve().parent / 'src'))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from pipeline import Pipeline
+from src.pipeline import Pipeline
 
 def regenerate_report_from_state(state_path: Path, args):
     """

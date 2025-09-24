@@ -203,9 +203,9 @@ class ProjectManager:
                             if method == "points" and not points:
                                 method = "full_average"
                             points_as_dicts = [p.model_dump() for p in points] if points else None
-                            training_image_configs.append({"filename": item.name, "path": str(item), "method": method, "points": points_as_dicts})
+                            training_image_configs.append({"filename": item.name, "path": item, "method": method, "points": points_as_dicts})
                         else:
-                            training_image_configs.append({"filename": item.name, "path": str(item), "method": "full_average"})
+                            training_image_configs.append({"filename": item.name, "path": item, "method": "full_average"})
 
         dataset_image_configs = []
         dataset_path = project_path / "dataset"
@@ -313,7 +313,7 @@ class ProjectManager:
                 continue
 
         if not all_hsv_colors:
-            raise ValueError(f"No valid dataset images processed or no non-transparent pixels in provided paths.")
+            raise ValueError("No valid dataset images processed or no non-transparent pixels in provided paths.")
 
         return np.vstack(all_hsv_colors)
 

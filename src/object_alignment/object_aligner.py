@@ -8,6 +8,8 @@ maximization, contour centroid alignment, and polygon-based alignment.
 
 import cv2
 import numpy as np
+import os
+from src.utils.image_utils import save_image
 
 # This class is well-formed and requires no corrections.
 # Ensure it is defined or imported before calling the align_image function.
@@ -32,6 +34,8 @@ class AdvancedAligner:
         poly_epsilon_ratio=0.02,
         edge_method="canny",
         corner_method="shi-tomasi",
+        debug_mode=False,
+        output_dir=None,
     ):
         """
         Initializes the AdvancedAligner with various configuration parameters.
@@ -55,6 +59,8 @@ class AdvancedAligner:
                                          Defaults to "canny".
             corner_method (str, optional): Corner detection technique ('shi-tomasi', 'harris').
                                            Defaults to "shi-tomasi".
+            debug_mode (bool, optional): Enables saving of intermediate debug images. Defaults to False.
+            output_dir (str, optional): Directory to save debug images. Defaults to None.
         """
         self.max_features = max_features
         self.good_match_percent = good_match_percent
@@ -65,6 +71,8 @@ class AdvancedAligner:
         self.poly_epsilon_ratio = poly_epsilon_ratio
         self.edge_method = edge_method
         self.corner_method = corner_method
+        self.debug_mode = debug_mode
+        self.output_dir = output_dir
 
         # Feature detectors
         try:
@@ -181,58 +189,79 @@ class AdvancedAligner:
         """
         return cv2.convexHull(contour)
 
-    def align_by_feature(self, src, ref, use_sift=False):
+    def align_by_feature(self, img_to_align, ref_img, use_sift=False):
         """
-        Aligns a source image to a reference image using feature matching (ORB or SIFT).
-
-        Args:
-            src (np.ndarray): The source image to be aligned.
-            ref (np.ndarray): The reference image.
-            use_sift (bool, optional): If True, uses SIFT; otherwise, uses ORB. Defaults to False.
-
-        Returns:
-            np.ndarray: The aligned image.
-
-        Raises:
-            RuntimeError: If feature detector is not available, no descriptors are found,
-                          or not enough good matches are found.
+        Aligns images using feature detection (ORB or SIFT).
         """
-        src_gray = self.preprocess_gray(src)
-        ref_gray = self.preprocess_gray(ref)
-        detector = self.sift if use_sift and self.sift is not None else self.orb
-        if detector is None:
-            raise RuntimeError("Feature detector not available in OpenCV installation")
-        kp1, des1 = detector.detectAndCompute(src_gray, None)
-        kp2, des2 = detector.detectAndCompute(ref_gray, None)
-        if des1 is None or des2 is None:
-            raise RuntimeError("No descriptors found for feature matching")
-        bf = cv2.BFMatcher(
-            cv2.NORM_L2 if use_sift else cv2.NORM_HAMMING, crossCheck=True
-        )
-        matches = bf.match(des1, des2)
-        matches = sorted(matches, key=lambda x: x.distance)
-        good_matches = matches[: int(len(matches) * self.good_match_percent)]
-        if len(good_matches) < 4:
-            raise RuntimeError(
-                f"Not enough good matches for alignment: {len(good_matches)} found"
-            )
-        pts_src = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(
-            -1, 1, 2
-        )
-        pts_ref = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(
-            -1, 1, 2
-        )
-        if self.motion_model == "homography":
-            H, _ = cv2.findHomography(pts_src, pts_ref, cv2.RANSAC)
-            aligned = cv2.warpPerspective(
-                src, H, (ref.shape[1], ref.shape[0]), borderMode=cv2.BORDER_REPLICATE
-            )
+        if use_sift:
+            if self.sift is None:
+                print("[WARNING] SIFT detector not available. Please install opencv-contrib-python. Falling back to ORB.")
+                detector = self.orb
+                norm = cv2.NORM_HAMMING
+            else:
+                detector = self.sift
+                norm = cv2.NORM_L2
         else:
-            M, _ = cv2.estimateAffinePartial2D(pts_src, pts_ref)
-            aligned = cv2.warpAffine(
-                src, M, (ref.shape[1], ref.shape[0]), borderMode=cv2.BORDER_REPLICATE
-            )
-        return aligned
+            if self.orb is None:
+                raise RuntimeError("ORB detector not available.")
+            detector = self.orb
+            norm = cv2.NORM_HAMMING
+
+        kp1, des1 = detector.detectAndCompute(img_to_align, None)
+        kp2, des2 = detector.detectAndCompute(ref_img, None)
+
+        if des1 is None or des2 is None or len(kp1) == 0 or len(kp2) == 0:
+            if self.debug_mode:
+                print("[DEBUG] Alignment failed: No features/descriptors found in one of the images.")
+            return None
+
+        # Use BFMatcher and k-NN matching
+        bf = cv2.BFMatcher(norm, crossCheck=False)
+        matches = bf.knnMatch(des1, des2, k=2)
+
+        # Apply ratio test to find good matches
+        good_matches = []
+        # Ensure matches is not empty and contains lists of 2
+        for match_pair in matches:
+            if len(match_pair) == 2:
+                m, n = match_pair
+                if m.distance < 0.75 * n.distance:
+                    good_matches.append(m)
+
+        if self.debug_mode and self.output_dir:
+            # Draw matches for debugging
+            img_matches = cv2.drawMatches(img_to_align, kp1, ref_img, kp2, good_matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+            debug_image_path = os.path.join(self.output_dir, "feature_matches.png")
+            save_image(debug_image_path, img_matches)
+            print(f"[DEBUG] Saved feature matching visualization to {debug_image_path}")
+        
+        MIN_MATCHES = 10
+        if len(good_matches) < MIN_MATCHES:
+            if self.debug_mode:
+                print(f"[DEBUG] Alignment failed: Not enough good matches found ({len(good_matches)}/{MIN_MATCHES}).")
+            return None
+
+        src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+        dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+
+        # Determine motion model from constructor
+        if self.motion_model == "homography":
+            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+        else:  # Default to affine
+            M, mask = cv2.estimateAffine2D(src_pts, dst_pts)
+
+        if M is None:
+            if self.debug_mode:
+                print("[DEBUG] Alignment failed: Could not compute the transformation matrix (homography/affine).")
+            return None
+
+        h, w = ref_img.shape[:2]
+        if self.motion_model == "homography":
+            aligned_img = cv2.warpPerspective(img_to_align, M, (w, h))
+        else:
+            aligned_img = cv2.warpAffine(img_to_align, M, (w, h))
+
+        return aligned_img
 
     def align_by_ecc(self, src, ref):
         """
@@ -250,8 +279,8 @@ class AdvancedAligner:
         Raises:
             RuntimeError: If initial feature-based alignment fails or ECC refinement encounters an error.
         """
-        # First, get a rough alignment using features
-        aligned_src = self.align_by_feature(src, ref)
+        # First, get a rough alignment using features (ORB by default)
+        aligned_src = self.align_by_feature(src, ref, use_sift=False)
         if aligned_src is None:
             raise RuntimeError(
                 "Initial feature-based alignment failed, so ECC cannot proceed."

@@ -8,7 +8,7 @@ import cv2
 from PIL import Image, ImageTk
 
 from src.pipeline import run_analysis
-from src.color_analysis.project_manager import ProjectManager
+from src.project_manager import ProjectManager
 from src.create_project import create_project
 from src.sample_manager.dataset_gui import DatasetManagerGUI
 
