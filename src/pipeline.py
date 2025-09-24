@@ -36,6 +36,7 @@ class Pipeline:
         self.debug_data_for_report = {}
         self.debug_image_pipeline = []
         self.pipeline_step_counter = 1
+        self.pipeline_image_stages = {} # To store image output of each step
 
 
     def load_project_data(self):
@@ -67,6 +68,9 @@ class Pipeline:
         self.original_input_image_bgr, _ = load_image(self.image_path)
         if self.original_input_image_bgr is None:
             raise ValueError(f"Could not load image {self.image_path}")
+
+        # Store the original image as the first stage
+        self.pipeline_image_stages['original'] = self.original_input_image_bgr.copy()
 
         if self.args.debug:
             import shutil
@@ -130,6 +134,7 @@ class Pipeline:
         )
 
         self.image_to_be_processed = correction_result['image']
+        self.pipeline_image_stages['color_corrected'] = self.image_to_be_processed.copy()
 
         if self.args.debug and correction_result['debug_path']:
             self.debug_image_pipeline.append(
@@ -160,6 +165,7 @@ class Pipeline:
 
         if result and result.get('image') is not None:
             self.image_to_be_processed = result['image']
+            self.pipeline_image_stages['geometrically_aligned'] = self.image_to_be_processed.copy()
             self.debug_data_for_report["geometrical_alignment_data"] = result.get('alignment_data')
             
             if self.args.debug and result.get('debug_paths'):
@@ -199,12 +205,23 @@ class Pipeline:
 
         if result and result.get('image') is not None:
             self.image_to_be_processed = result['image']
+            self.pipeline_image_stages['object_aligned'] = self.image_to_be_processed.copy()
+
             if self.args.debug and result.get('debug_paths'):
+                debug_paths = result['debug_paths']
+                # Store statistics
+                if 'good_feature_matches' in debug_paths:
+                    self.debug_data_for_report['object_alignment_stats'] = {
+                        'good_feature_matches': debug_paths['good_feature_matches']
+                    }
+
+                # Store images for report
                 path_titles = {
-                    'feature_matches': "Feature Matches",
+                    'feature_matches_image': "Feature Matches",
                     'final_aligned': "After Object Alignment"
                 }
-                for key, path in result['debug_paths'].items():
+                for key, path in debug_paths.items():
+                    if not isinstance(path, str): continue # Skip non-path values like stats
                     title = path_titles.get(key, key.replace('_', ' ').title())
                     self.debug_image_pipeline.append({
                         "title": f"{self.pipeline_step_counter}. OA: {title}",
@@ -238,6 +255,9 @@ class Pipeline:
         )
 
         self.image_to_be_processed = result['image']
+        self.pipeline_image_stages['masked'] = self.image_to_be_processed.copy()
+        if result.get('stats'):
+            self.debug_data_for_report['masking_stats'] = result['stats']
 
         if self.args.debug and result['debug_paths']:
             for debug_info in result['debug_paths']:
@@ -270,6 +290,7 @@ class Pipeline:
             agg_min_area=self.args.agg_min_area,
             agg_density_thresh=self.args.agg_density_thresh,
         )
+        self.pipeline_image_stages['color_analyzed'] = self.analysis_results['processed_image'].copy()
         
         if self.args.debug and self.analysis_results.get('debug_info'):
             for debug_item in self.analysis_results['debug_info']:
@@ -323,6 +344,7 @@ class Pipeline:
         )
         
         self.image_to_be_processed = blur_result['image']
+        self.pipeline_image_stages['blurred'] = self.image_to_be_processed.copy()
         self.debug_data_for_report["blur_kernel_used"] = blur_result['kernel_used']
 
         if self.args.debug and blur_result['debug_path']:

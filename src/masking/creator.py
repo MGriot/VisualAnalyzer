@@ -226,6 +226,16 @@ def create_and_apply_mask_from_layers(
     # transparent black ([0, 0, 0, 0]). For BGR, it makes them black.
     masked_image = cv2.bitwise_and(image_to_be_processed, image_to_be_processed, mask=final_mask)
 
+    # Calculate statistics
+    kept_pixels = np.count_nonzero(final_mask)
+    total_pixels = final_mask.shape[0] * final_mask.shape[1]
+    kept_percentage = (kept_pixels / total_pixels) * 100 if total_pixels > 0 else 0
+    mask_stats = {
+        'kept_pixels': kept_pixels,
+        'total_pixels': total_pixels,
+        'kept_percentage': kept_percentage
+    }
+
     path = os.path.join(output_dir, "masked_image.png")
     save_image(path, masked_image)
     
@@ -235,4 +245,4 @@ def create_and_apply_mask_from_layers(
         debug_paths.append({'title': "Final Applied Mask", 'path': mask_path})
         debug_paths.append({'title': "After Masking", 'path': path})
 
-    return {'image': masked_image, 'debug_paths': debug_paths}
+    return {'image': masked_image, 'debug_paths': debug_paths, 'stats': mask_stats}

@@ -243,9 +243,11 @@ class AdvancedAligner:
             img_matches = cv2.drawMatches(img_to_align, kp1, ref_img, kp2, good_matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
             debug_image_path = os.path.join(self.output_dir, "feature_matches.png")
             save_image(debug_image_path, img_matches)
-            debug_paths['feature_matches'] = debug_image_path
+            debug_paths['feature_matches_image'] = debug_image_path
             print(f"[DEBUG] Saved feature matching visualization to {debug_image_path}")
         
+        debug_paths['good_feature_matches'] = len(good_matches)
+
         MIN_MATCHES = 10
         if len(good_matches) < MIN_MATCHES:
             if self.debug_mode:
