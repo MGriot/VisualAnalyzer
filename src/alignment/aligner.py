@@ -110,7 +110,7 @@ class ArucoAligner:
         """
         self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(aruco_dict)
         self.aruco_parameters = cv2.aruco.DetectorParameters()
-        
+
         # Aggressive tuning for difficult conditions (wrinkled paper, glare)
         self.aruco_parameters.adaptiveThreshWinSizeMin = 3
         self.aruco_parameters.adaptiveThreshWinSizeMax = 55 # Wider search range for thresholding window
@@ -167,9 +167,12 @@ class ArucoAligner:
 
         Raises:
             ValueError: If the input `image` is None.
-        """
 
-        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        """
+        if len(image.shape) == 3 and image.shape[2] == 4:
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+        else:
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = self.detector.detectMarkers(gray_image)
 
         if ids is None or len(ids) < 4:
@@ -183,13 +186,16 @@ class ArucoAligner:
         for c in corners:
             cv2.cornerSubPix(gray_image, c, (5, 5), (-1, -1), criteria)
 
+        debug_paths = {}
         if self.debug_mode:
             img_with_markers = image.copy()
             cv2.aruco.drawDetectedMarkers(img_with_markers, corners, ids)
+            detected_markers_path = os.path.join(self.output_dir, "aruco_markers_detected.png")
             cv2.imwrite(
-                os.path.join(self.output_dir, "aruco_markers_detected.png"),
+                detected_markers_path,
                 img_with_markers,
             )
+            debug_paths['detected_markers'] = detected_markers_path
             print(f"[DEBUG] Detected marker IDs: {ids.flatten()}")
 
         # --- START OF MODIFIED LOGIC ---
@@ -209,7 +215,7 @@ class ArucoAligner:
 
         # We rely on the dictionary insertion order from the JSON file (Python 3.7+).
         ordered_ids = list(marker_map_int_keys.keys())
-        
+
         if len(ordered_ids) < 4:
             if self.debug_mode:
                 print(f"[DEBUG] Error: 'aruco_marker_map' must contain at least 4 markers. Found: {len(ordered_ids)}")
@@ -275,7 +281,7 @@ class ArucoAligner:
             mid: marker_map_int_keys[mid] for mid in ordered_ids if mid in detected_markers
         }
 
-        return aligned_image, h, corners, ids, used_marker_map, source_points, dest_points
+        return aligned_image, h, corners, ids, used_marker_map, source_points, dest_points, debug_paths
 
     def align_image_to_reference(self, image: np.ndarray, reference_image: np.ndarray):
         """
@@ -287,7 +293,10 @@ class ArucoAligner:
             raise ValueError("Reference image is None.")
 
         # Detect markers in both images
-        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        if len(image.shape) == 3 and image.shape[2] == 4:
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+        else:
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         src_corners, src_ids, _ = self.detector.detectMarkers(gray_image)
 
         gray_ref_image = cv2.cvtColor(reference_image, cv2.COLOR_BGR2GRAY)
@@ -369,7 +378,7 @@ class Aligner:
         Aligns an image using either a reference ArUco image or a predefined marker map.
 
         Args:
-            image (np.ndarray): The input image (BGR format) to be aligned.
+            image (np.ndarray): The input image (BGR or BGRA) to be aligned.
             aruco_reference_path (str, optional): Path to an image containing the ideal
                                                   ArUco markers for alignment. If provided,
                                                   `marker_map` and `output_size_wh` are ignored.
@@ -381,17 +390,18 @@ class Aligner:
                                               Required if `marker_map` is provided.
 
         Returns:
-            tuple: A tuple containing:
-                - aligned_image (np.ndarray or None): The aligned image, or None if alignment fails.
-                - alignment_data (dict or None): A dictionary containing details about the alignment,
-                                                 such as the homography matrix, detected corners, etc.,
-                                                 or None if alignment fails.
+            dict: A dictionary containing:
+                - 'image' (np.ndarray | None): The aligned image, or None if alignment fails.
+                - 'alignment_data' (dict | None): Details about the alignment.
+                - 'debug_path' (str | None): Path to the saved aligned image, or None.
 
         Raises:
-            ValueError: If neither `aruco_reference_path` nor both `marker_map` and
-                        `output_size_wh` are provided.
-            FileNotFoundError: If `aruco_reference_path` is provided but the file cannot be read.
+            ValueError: If required arguments are missing.
+            FileNotFoundError: If the reference image cannot be read.
         """
+        aligned_image = None
+        alignment_data = None
+
         if aruco_reference_path:
             reference_image = cv2.imread(aruco_reference_path)
             if reference_image is None:
@@ -399,28 +409,41 @@ class Aligner:
             
             aligned_image, homography = self.aruco_aligner.align_image_to_reference(image, reference_image)
             
-            alignment_data = None
             if aligned_image is not None:
                 alignment_data = {
                     "homography_matrix": homography.tolist(),
                 }
-            return aligned_image, alignment_data
 
         elif marker_map and output_size_wh:
-            aligned_image, homography, corners, ids, used_map, source_points, dest_points = (
+            img, h, corners, ids, used_map, src_pts, dest_pts, aruco_debug_paths = (
                 self.aruco_aligner.align_image_by_markers(image, marker_map, output_size_wh)
             )
-            alignment_data = None
+            aligned_image = img
             if aligned_image is not None:
                 alignment_data = {
-                    "homography_matrix": homography.tolist(),
+                    "homography_matrix": h.tolist(),
                     "detected_corners": [c.tolist() for c in corners],
                     "detected_ids": ids.flatten().tolist(),
-                    "used_marker_map": used_map,  # Values are already lists from JSON
-                    "source_points": source_points.tolist(),
-                    "dest_points": dest_points.tolist(),
+                    "used_marker_map": used_map,
+                    "source_points": src_pts.tolist(),
+                    "dest_points": dest_pts.tolist(),
+                    "aruco_debug_paths": aruco_debug_paths
                 }
-            return aligned_image, alignment_data
         
         else:
             raise ValueError("Either 'aruco_reference_path' or both 'marker_map' and 'output_size_wh' must be provided for alignment.")
+
+        debug_paths = {}
+        if aligned_image is not None and self.output_dir:
+            debug_paths['final_aligned'] = os.path.join(self.output_dir, "geometrically_aligned.png")
+            cv2.imwrite(debug_paths['final_aligned'], aligned_image)
+
+        # Capture additional debug paths from the aruco aligner if they exist
+        if 'aruco_debug_paths' in alignment_data:
+            debug_paths.update(alignment_data.pop('aruco_debug_paths'))
+
+        return {
+            'image': aligned_image,
+            'alignment_data': alignment_data,
+            'debug_paths': debug_paths
+        }

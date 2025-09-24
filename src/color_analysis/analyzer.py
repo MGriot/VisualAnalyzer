@@ -320,6 +320,18 @@ class ColorAnalyzer:
         if center_hsv is not None:
             center_rgb = cv2.cvtColor(np.uint8([[center_hsv]]), cv2.COLOR_HSV2RGB)[0][0]
 
+        # --- Prepare Debug Information ---
+        debug_info_list = []
+        if debug_mode:
+            # The order here determines the order in the report
+            debug_info_list.append({'title': 'Input to Color Analysis', 'path': input_to_analysis_path})
+            if mask_pre_aggregation_path:
+                debug_info_list.append({'title': 'Mask Before Aggregation', 'path': mask_pre_aggregation_path})
+            debug_info_list.append({'title': 'Final Color Mask', 'path': mask_path})
+            debug_info_list.append({'title': 'Negative Mask', 'path': negative_mask_path})
+            debug_info_list.append({'title': 'Image with Contours', 'path': contours_image_path})
+            debug_info_list.append({'title': 'Final Processed Image (Blacked Out)', 'path': processed_image_path})
+
         return {
             "original_image": input_image,
             "processed_image": processed_image,
@@ -351,4 +363,5 @@ class ColorAnalyzer:
                     ),
                 }
             ],
+            "debug_info": debug_info_list
         }

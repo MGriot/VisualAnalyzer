@@ -440,7 +440,7 @@ class ReportGenerator:
                 story.append(PageBreak())
                 story.append(Paragraph("Symmetry Analysis", h2_style))
                 story.append(Paragraph("Scores:", h3_style))
-                scores_only = {k: v.get('score', 'N/A') for k, v in debug_data['symmetry_results'].items()}
+                scores_only = {k: v.get('score', 'N/A') for k, v in debug_data['symmetry_results'].items() if isinstance(v, dict)}
                 symmetry_scores = [[k,v] for k,v in scores_only.items()]
                 if symmetry_scores:
                     tbl = Table(symmetry_scores, colWidths=[2.5*inch, 4*inch])

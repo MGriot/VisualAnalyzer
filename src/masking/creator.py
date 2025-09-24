@@ -154,3 +154,85 @@ class MaskCreator:
 
         # This function correctly returns the final 4-channel image.
         return image
+
+def create_and_apply_mask_from_layers(
+    image_to_be_processed: np.ndarray,
+    project_files: dict,
+    masking_order: list,
+    mask_bg_is_white: bool,
+    output_dir: str,
+    debug_mode: bool = False,
+) -> dict:
+    """
+    Creates a composite mask from multiple drawing layers and applies it to an image.
+
+    This function encapsulates the logic of iterating through specified drawing layers,
+    generating a mask from each, combining them, and applying the final mask to the
+    input image. It also handles saving intermediate and final outputs for debugging.
+
+    Args:
+        image_to_be_processed (np.ndarray): The input image (BGR or BGRA) to be masked.
+        project_files (dict): A dictionary of project file paths.
+        masking_order (list): A list of layer numbers (as strings) to combine for the mask.
+        mask_bg_is_white (bool): Flag indicating if white should be treated as background.
+        output_dir (str): The directory to save output and debug files.
+        debug_mode (bool, optional): Enables saving of debug files. Defaults to False.
+
+    Returns:
+        dict: A dictionary containing:
+            - 'image' (np.ndarray | None): The masked image, or None if masking fails.
+            - 'debug_paths' (list): A list of dictionaries with title and path for debug reports.
+    """
+    mask_creator = MaskCreator()
+    final_mask = None
+    debug_paths = []
+
+    for layer_num in masking_order:
+        layer_key = f"technical_drawing_layer_{layer_num}"
+        drawing_path = project_files.get(layer_key)
+        if drawing_path:
+            if debug_mode:
+                print(f"[DEBUG] Attempting to create mask from layer {layer_num} using file: {drawing_path}")
+            mask = mask_creator.create_mask(
+                str(drawing_path), 
+                treat_white_as_bg=mask_bg_is_white, 
+                debug_mode=debug_mode, 
+                output_dir=output_dir, 
+                image_for_debug=image_to_be_processed
+            )
+            if mask is not None:
+                if final_mask is None:
+                    final_mask = mask
+                else:
+                    final_mask = cv2.bitwise_and(final_mask, mask)
+                if debug_mode:
+                    print(f"[DEBUG] Successfully created and combined mask from layer {layer_num}.")
+            elif debug_mode:
+                print(f"[WARNING] Failed to create mask from layer {layer_num} file: {drawing_path}")
+        elif debug_mode:
+            print(f"[WARNING] No path found for technical_drawing_layer_{layer_num} in project configuration.")
+    
+    if final_mask is None:
+        raise RuntimeError("Masking step was enabled but failed to generate a final mask.")
+
+    if debug_mode:
+        print(f"[DEBUG] Final mask created. Applying to image.")
+
+    # If the image is grayscale, convert it to BGR. This leaves BGRA images untouched.
+    if len(image_to_be_processed.shape) == 2:
+        image_to_be_processed = cv2.cvtColor(image_to_be_processed, cv2.COLOR_GRAY2BGR)
+
+    # Apply the mask. For BGRA images, this correctly makes masked-out areas
+    # transparent black ([0, 0, 0, 0]). For BGR, it makes them black.
+    masked_image = cv2.bitwise_and(image_to_be_processed, image_to_be_processed, mask=final_mask)
+
+    path = os.path.join(output_dir, "masked_image.png")
+    save_image(path, masked_image)
+    
+    if debug_mode:
+        mask_path = os.path.join(output_dir, "final_mask.png")
+        save_image(mask_path, final_mask)
+        debug_paths.append({'title': "Final Applied Mask", 'path': mask_path})
+        debug_paths.append({'title': "After Masking", 'path': path})
+
+    return {'image': masked_image, 'debug_paths': debug_paths}

@@ -33,14 +33,18 @@ class SymmetryAnalyzer:
         mask (np.ndarray): A mask indicating active pixels for similarity calculations.
         results (dict): A dictionary storing the symmetry analysis results (scores, chunks, etc.).
     """
-    def __init__(self, image):
+    def __init__(self, image, output_dir=None, debug_mode=False):
         """
         Initializes the SymmetryAnalyzer with an image to be analyzed.
 
         Args:
             image (np.ndarray): The input image (ideally a binary mask) for symmetry analysis.
+            output_dir (str, optional): Directory to save debug images. Defaults to None.
+            debug_mode (bool, optional): Enables saving of debug images. Defaults to False.
         """
         self.original_image = image
+        self.output_dir = output_dir
+        self.debug_mode = debug_mode
         self.results = {}
         self._preprocess_image()
 
@@ -315,11 +319,7 @@ class SymmetryAnalyzer:
     # --- Utility Methods ---
     def analyze_all(self):
         """
-        Runs a standard suite of symmetry analyses on the processed image.
-
-        This includes vertical reflection, horizontal reflection, four-quadrant,
-        90-degree rotational, 180-degree rotational, translational, and glide-reflection symmetries.
-        Results are stored in `self.results`.
+        Runs a standard suite of symmetry analyses and saves visualizations if in debug mode.
         """
         self.analyze_vertical_reflection()
         self.analyze_horizontal_reflection()
@@ -328,6 +328,59 @@ class SymmetryAnalyzer:
         self.analyze_rotational(180)
         self.analyze_translational()
         self.analyze_glide_reflection()
+
+        if self.debug_mode and self.output_dir:
+            import os
+            from src.utils.image_utils import save_image
+            visualizations = []
+            for analysis_type, result in self.results.items():
+                # Skip the special 'visualizations' key itself
+                if analysis_type == 'visualizations':
+                    continue
+
+                vis_img = None
+                # Handle analyses that produce a direct reconstruction
+                if 'reconstruction' in result:
+                    vis_img = result['reconstruction']
+                # Handle analyses that produce comparison chunks
+                elif 'chunks' in result and isinstance(result['chunks'], dict):
+                    chunks = list(result['chunks'].values())
+                    if len(chunks) == 2:
+                        # Ensure chunks are 8-bit before stacking
+                        chunk1 = chunks[0].astype(np.uint8)
+                        chunk2 = chunks[1].astype(np.uint8)
+                        # Simple stacking logic: horizontal for same height, vertical otherwise
+                        try:
+                            if chunk1.shape[0] == chunk2.shape[0]:
+                                vis_img = np.hstack([chunk1, chunk2])
+                            else:
+                                # Resize for stacking if needed, maintaining aspect ratio
+                                h1, w1 = chunk1.shape[:2]
+                                h2, w2 = chunk2.shape[:2]
+                                if w1 != w2:
+                                    new_w = max(w1, w2)
+                                    chunk1 = cv2.resize(chunk1, (new_w, int(h1 * new_w / w1)))
+                                    chunk2 = cv2.resize(chunk2, (new_w, int(h2 * new_w / w2)))
+                                vis_img = np.vstack([chunk1, chunk2])
+                        except Exception as e:
+                            print(f"[DEBUG] Could not create composite visualization for {analysis_type}: {e}")
+
+                if vis_img is not None:
+                    fname = f"symmetry_{analysis_type}.png"
+                    path = os.path.join(self.output_dir, fname)
+                    # Ensure image is 8-bit for saving
+                    if vis_img.dtype != np.uint8:
+                        vis_img = vis_img.astype(np.uint8)
+                    # Scale binary images for better visibility
+                    if np.max(vis_img) == 1:
+                        vis_img = vis_img * 255
+
+                    save_image(path, vis_img)
+                    visualizations.append({
+                        'title': f"Symmetry: {analysis_type.replace('_', ' ').title()}",
+                        'path': path
+                    })
+            self.results['visualizations'] = visualizations
 
     def report(self):
         """

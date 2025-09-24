@@ -89,12 +89,17 @@ class AdvancedAligner:
         Converts an input image to grayscale if it's a color image, otherwise returns a copy.
 
         Args:
-            img (np.ndarray): The input image (BGR or grayscale).
+            img (np.ndarray): The input image (BGR, BGRA, or grayscale).
 
         Returns:
             np.ndarray: The grayscale version of the image.
         """
-
+        if len(img.shape) == 3:
+            if img.shape[2] == 4:
+                return cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
+            else:
+                return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return img.copy()
     def detect_edges(self, gray):
         """
         Detects edges in a grayscale image using the configured edge detection method.
@@ -207,8 +212,12 @@ class AdvancedAligner:
             detector = self.orb
             norm = cv2.NORM_HAMMING
 
-        kp1, des1 = detector.detectAndCompute(img_to_align, None)
-        kp2, des2 = detector.detectAndCompute(ref_img, None)
+        # Preprocess images to grayscale for feature detection
+        gray_to_align = self.preprocess_gray(img_to_align)
+        gray_ref = self.preprocess_gray(ref_img)
+
+        kp1, des1 = detector.detectAndCompute(gray_to_align, None)
+        kp2, des2 = detector.detectAndCompute(gray_ref, None)
 
         if des1 is None or des2 is None or len(kp1) == 0 or len(kp2) == 0:
             if self.debug_mode:
@@ -228,11 +237,13 @@ class AdvancedAligner:
                 if m.distance < 0.75 * n.distance:
                     good_matches.append(m)
 
+        debug_paths = {}
         if self.debug_mode and self.output_dir:
             # Draw matches for debugging
             img_matches = cv2.drawMatches(img_to_align, kp1, ref_img, kp2, good_matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
             debug_image_path = os.path.join(self.output_dir, "feature_matches.png")
             save_image(debug_image_path, img_matches)
+            debug_paths['feature_matches'] = debug_image_path
             print(f"[DEBUG] Saved feature matching visualization to {debug_image_path}")
         
         MIN_MATCHES = 10
@@ -261,7 +272,7 @@ class AdvancedAligner:
         else:
             aligned_img = cv2.warpAffine(img_to_align, M, (w, h))
 
-        return aligned_img
+        return aligned_img, debug_paths
 
     def align_by_ecc(self, src, ref):
         """
@@ -431,24 +442,36 @@ class AdvancedAligner:
                                     Defaults to "feature_orb".
 
         Returns:
-            np.ndarray or None: The aligned image, or None if alignment fails.
-
-        Raises:
-            ValueError: If an unknown alignment method is specified.
+            dict: A dictionary containing:
+                - 'image' (np.ndarray | None): The aligned image, or None if alignment fails.
+                - 'debug_paths' (dict): A dictionary of paths to any generated debug images.
         """
+        aligned_image = None
+        debug_paths = {}
         try:
-            if method == "feature_orb":
-                return self.align_by_feature(src, ref, use_sift=False)
-            elif method == "feature_sift":
-                return self.align_by_feature(src, ref, use_sift=True)
+            if method in ["feature_orb", "feature_sift"]:
+                aligned_image, feature_debug_paths = self.align_by_feature(src, ref, use_sift=(method=="feature_sift"))
+                debug_paths.update(feature_debug_paths)
             elif method == "ecc":
-                return self.align_by_ecc(src, ref)
+                # Note: align_by_ecc calls align_by_feature internally, but we don't get its debug paths here.
+                # This could be improved in a future refactoring.
+                aligned_image = self.align_by_ecc(src, ref)
             elif method == "contour_centroid":
-                return self.align_by_contour_centroid(src, ref)
+                aligned_image = self.align_by_contour_centroid(src, ref)
             elif method == "polygon":
-                return self.align_by_polygon(src, ref)
+                aligned_image = self.align_by_polygon(src, ref)
             else:
                 raise ValueError(f"Unknown method: {method}")
         except Exception as e:
             print(f"[Alignment error with method {method}]: {e}")
-            return None
+            aligned_image = None
+
+        if aligned_image is not None and self.output_dir:
+            final_path = os.path.join(self.output_dir, "object_aligned.png")
+            save_image(final_path, aligned_image)
+            debug_paths['final_aligned'] = final_path
+        
+        return {
+            'image': aligned_image,
+            'debug_paths': debug_paths
+        }

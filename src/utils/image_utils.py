@@ -48,9 +48,9 @@ def save_image(image_path: str, image: np.ndarray):
     """
     cv2.imwrite(image_path, image)
 
-def blur_image(image: np.ndarray, kernel_size: Tuple[int, int] | None = None) -> Tuple[np.ndarray, Tuple[int, int]]:
+def blur_image(image: np.ndarray, kernel_size: Tuple[int, int] | None = None, output_dir: str | None = None) -> dict:
     """
-    Applies a Gaussian blur filter to the input image.
+    Applies a Gaussian blur filter to the input image, optionally saving the result.
 
     If `kernel_size` is not provided, it is adaptively calculated based on the
     smaller dimension of the image to ensure a reasonable blur effect.
@@ -60,11 +60,14 @@ def blur_image(image: np.ndarray, kernel_size: Tuple[int, int] | None = None) ->
         kernel_size (Tuple[int, int] | None, optional): The size of the Gaussian kernel (width, height).
                                                         Both dimensions must be odd. If None, it's calculated automatically.
                                                         Defaults to None.
+        output_dir (str | None, optional): If provided, the directory where the blurred image will be saved.
+                                           Defaults to None.
 
     Returns:
-        Tuple[np.ndarray, Tuple[int, int]]: A tuple containing:
-            - The blurred image as a NumPy array.
-            - The kernel size (width, height) that was actually used for blurring.
+        dict: A dictionary containing:
+            - 'image' (np.ndarray): The blurred image.
+            - 'kernel_used' (Tuple[int, int]): The kernel size used.
+            - 'debug_path' (str | None): The path to the saved blurred image, or None if not saved.
     """
     if kernel_size is None:
         # Adaptively calculate kernel size based on the smaller dimension of the image.
@@ -78,4 +81,16 @@ def blur_image(image: np.ndarray, kernel_size: Tuple[int, int] | None = None) ->
         
         kernel_size = (kernel_dim, kernel_dim)
 
-    return cv2.GaussianBlur(image, kernel_size, 0), kernel_size
+    blurred_image = cv2.GaussianBlur(image, kernel_size, 0)
+    
+    debug_path = None
+    if output_dir:
+        import os
+        debug_path = os.path.join(output_dir, "blurred.png")
+        save_image(debug_path, blurred_image)
+
+    return {
+        'image': blurred_image,
+        'kernel_used': kernel_size,
+        'debug_path': debug_path
+    }

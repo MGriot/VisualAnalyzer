@@ -200,25 +200,33 @@ class ColorCorrector:
 
         return M
 
-    def apply_color_correction(self, image: np.ndarray, correction_matrix: np.ndarray) -> np.ndarray:
+    def apply_color_correction(self, image: np.ndarray, correction_matrix: np.ndarray, output_dir: str | None = None) -> dict:
         """
-        Applies a given 3x3 color correction matrix to an input image.
-
-        The image pixels are reshaped, transformed by the matrix, and then clipped
-        to ensure valid BGR color ranges (0-255).
+        Applies a given 3x3 color correction matrix to an input image, handling BGRA images
+        by preserving the alpha channel. Optionally saves the output.
 
         Args:
-            image (np.ndarray): The input image (BGR format) to which the correction
-                                will be applied.
-            correction_matrix (np.ndarray): The 3x3 NumPy array representing the color
-                                            correction transformation.
+            image (np.ndarray): The input image (BGR or BGRA) to correct.
+            correction_matrix (np.ndarray): The 3x3 color correction matrix.
+            output_dir (str | None, optional): If provided, the directory where the corrected image is saved.
+                                           Defaults to None.
 
         Returns:
-            np.ndarray: The color-corrected image in BGR format.
+            dict: A dictionary containing:
+                - 'image' (np.ndarray): The color-corrected image.
+                - 'debug_path' (str | None): The path to the saved image, or None.
         """
-        # Reshape image to a 2D array of pixels (height*width, 3)
-        original_shape = image.shape
-        pixels = image.reshape(-1, 3).astype(np.float32)
+        # Handle 4-channel images by separating alpha, correcting BGR, and merging back.
+        is_4_channel = len(image.shape) == 3 and image.shape[2] == 4
+        
+        if is_4_channel:
+            alpha = image[:, :, 3]
+            bgr_image = image[:, :, :3]
+            original_shape = bgr_image.shape
+            pixels = bgr_image.reshape(-1, 3).astype(np.float32)
+        else:
+            original_shape = image.shape
+            pixels = image.reshape(-1, 3).astype(np.float32)
 
         # Apply the transformation
         corrected_pixels = np.dot(pixels, correction_matrix)
@@ -227,9 +235,24 @@ class ColorCorrector:
         corrected_pixels = np.clip(corrected_pixels, 0, 255).astype(np.uint8)
 
         # Reshape back to original image dimensions
-        corrected_image = corrected_pixels.reshape(original_shape)
+        corrected_bgr = corrected_pixels.reshape(original_shape)
 
-        return corrected_image
+        if is_4_channel:
+            corrected_image = cv2.merge([corrected_bgr, alpha])
+        else:
+            corrected_image = corrected_bgr
+
+        debug_path = None
+        if output_dir:
+            import os
+            from src.utils.image_utils import save_image
+            debug_path = os.path.join(output_dir, "color_corrected.png")
+            save_image(debug_path, corrected_image)
+
+        return {
+            'image': corrected_image,
+            'debug_path': debug_path
+        }
 
     def correct_image_colors(self, source_image_path: str, reference_image_path: str, debug_mode: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """
