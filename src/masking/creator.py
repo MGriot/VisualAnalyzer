@@ -218,13 +218,8 @@ def create_and_apply_mask_from_layers(
     if debug_mode:
         print(f"[DEBUG] Final mask created. Applying to image.")
 
-    # If the image is grayscale, convert it to BGR. This leaves BGRA images untouched.
-    if len(image_to_be_processed.shape) == 2:
-        image_to_be_processed = cv2.cvtColor(image_to_be_processed, cv2.COLOR_GRAY2BGR)
-
-    # Apply the mask. For BGRA images, this correctly makes masked-out areas
-    # transparent black ([0, 0, 0, 0]). For BGR, it makes them black.
-    masked_image = cv2.bitwise_and(image_to_be_processed, image_to_be_processed, mask=final_mask)
+    # Use the helper method to apply the mask as a true alpha channel, creating a BGRA image.
+    masked_image = mask_creator.apply_mask(image_to_be_processed, final_mask)
 
     # Calculate statistics
     kept_pixels = np.count_nonzero(final_mask)
