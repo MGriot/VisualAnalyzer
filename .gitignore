@@ -1,92 +1,12 @@
-# Gitignore for VisualAnalyzer
+# Ignore .env files
+.env
 
-# Operating System Files
-.DS_Store
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# Python
-__pycache__/
-*.pyc
-*.pyd
-*.pyo
-.Python
-build/
-develop-eggs/
-dist/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.md5
-*.html
-*.js
-*.pth
-.venv/
-venv/
-env/
-.env/
-
-# IDEs and Editors
-.idea/
-.vscode/
-*.sublime-project
-*.sublime-workspace
-*.komodoproject
-
-# Compiled files
-*.dll
-*.so
-*.dylib
-
-# Visual Studio Code
-.vscode/
-
-# PyCharm
-.idea/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Logs and temporary files
-*.log
-*.tmp
-*.bak
-*.swp
-*~
-.fuse_hidden*
-
-# Output directories
-output/
-
-# Cache directories
-cache/
-
-# Specific to Visual Analyzer
-# Cached data
-src/cache/
-data/projects/*/cache/
-
-# Report outputs (can be large)
-output/
-
+# Ignore .zip files
 *.zip
 
-#images
-*.png
-*.jpg
-*.jpeg
-*.bmp
-*.tiff
-*.gif
-*.svg
-*.ico
-*.webp
+# Ignore data and output directories
+data/
+output/
+
+# Ignore virtual environment
+.venv/
