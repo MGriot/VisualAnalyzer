@@ -10,3 +10,4 @@ output/
 
 # Ignore virtual environment
 .venv/
+src/__pycache__/
