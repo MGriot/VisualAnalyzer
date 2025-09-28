@@ -1,9 +1,16 @@
-numpy==2.2.4
+<<<<<<< Updated upstream
+version https://git-lfs.github.com/spec/v1
+oid sha256:30ee152b634f3e62acd0046f9b0094e64fe33f563011276476a6cd9eefe04fc3
+size 152
+=======
+numpy==2.3.3
 opencv-python==4.12.0.88
-ultralytics==8.3.191
+ultralytics==8.3.203
 jinja2==3.1.6
 weasyprint==66.0
-Pillow<11
+Pillow==11.3.0
 matplotlib==3.10.6
-pydantic==2.11.7
-reportlab==4.2.2
+pydantic==2.11.9
+reportlab==4.4.4
+streamlit==1.49.0
+>>>>>>> Stashed changes

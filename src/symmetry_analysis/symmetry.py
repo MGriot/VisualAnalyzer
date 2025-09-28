@@ -1,3 +1,8 @@
+<<<<<<< Updated upstream
+version https://git-lfs.github.com/spec/v1
+oid sha256:76a0b1dc7ef991be0e58a75e79bfb54aee0449e373a172c5c44a9dbbe924050f
+size 23284
+=======
 """
 This module provides the `SymmetryAnalyzer` class for performing various types
 of symmetry analysis on images.
@@ -110,7 +115,7 @@ class SymmetryAnalyzer:
     # ------------------------------------------------------------------------------------
     #  THEORY: Reflection is an isometry that maps an object onto its mirror image
     #  across a hyperplane (an axis in 2D). This analysis tests for invariance when
-    #  the image is reflected across its central vertical and horizontal axes.
+#  the image is reflected across its central vertical and horizontal axes.
     # ------------------------------------------------------------------------------------
     def analyze_vertical_reflection(self):
         """
@@ -446,3 +451,4 @@ if __name__ == "__main__":
     analyzer.visualize('horizontal_reflection')
     analyzer.visualize('four_quadrant')
     analyzer.visualize('rotational_180deg')
+>>>>>>> Stashed changes
