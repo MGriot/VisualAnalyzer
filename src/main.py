@@ -1,4 +1,5 @@
 import argparse
+from html import parser
 from src.pipeline import run_analysis
 
 def main():
@@ -24,9 +25,10 @@ def main():
     parser.add_argument("--drawing", type=str, help="Path to a technical drawing for masking.")
     parser.add_argument("--color-alignment", action="store_true", help="Enable color correction.")
     parser.add_argument("--sample-color-checker", type=str, help="Path to the color checker used as a sample for color alignment.")
+    parser.add_argument("--color-correction-method", type=str, default="linear", choices=["linear", "polynomial", "hsv", "histogram"], help="Specify the color correction algorithm.")
     parser.add_argument("--symmetry", action="store_true", help="Enable symmetry analysis.")
     parser.add_argument("--masking-order", type=str, default="1-2-3", help="Specify the order of masking layers (e.g., '1-2-3', '3-1-2').")
-    parser.add_argument("--report-type", type=str, default="all", choices=["html", "reportlab", "all"], help="Specify the type of PDF report to generate (default: all).")
+
     parser.add_argument("--agg-kernel-size", type=int, default=7, help="Kernel size for the aggregation dilation step.")
     parser.add_argument("--agg-min-area", type=float, default=0.0005, help="Minimum area ratio for keeping a component during aggregation.")
     parser.add_argument("--agg-density-thresh", type=float, default=0.5, help="Minimum density of original pixels for an aggregated area to be kept.")
@@ -36,7 +38,13 @@ def main():
     parser.add_argument("--skip-report-generation", action="store_true", help="Skip the report generation step.")
     parser.add_argument("--save-state-to", type=str, help="Path to save the pipeline state.")
     parser.add_argument("--load-state-from", type=str, help="Path to load a previously saved pipeline state.")
-
+    parser.add_argument(
+        '--object-alignment-shadow-removal', 
+        type=str, 
+        default='clahe', 
+        choices=['clahe', 'gamma', 'none'], 
+        help='Shadow removal method for object alignment. "clahe" is advanced, "gamma" is simple, "none" disables it.'
+    )
     args = parser.parse_args()
     
     if args.color_alignment and not args.sample_color_checker:

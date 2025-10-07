@@ -1,8 +1,3 @@
-<<<<<<< Updated upstream
-version https://git-lfs.github.com/spec/v1
-oid sha256:6dae941c26a662a4d6e6c2111d4f95963c3aa7de7974f36168e6a862147bb320
-size 31348
-=======
 """
 This module defines the `ProjectManager` class, responsible for handling project-specific
 configurations, file paths, and cached analysis data within the Visual Analyzer application.
@@ -150,254 +145,89 @@ class ProjectManager:
             project_name
         )
 
-        ref_color_checker_rel_path = getattr(
-            config_data, "reference_color_checker_path", None
-        )
-        colorchecker_ref_for_project_relative = getattr(
-            config_data, "colorchecker_reference_for_project", []
-        )
-        technical_drawing_rel_path_layer_1 = getattr(
-            config_data, "technical_drawing_path_layer_1", None
-        )
-        technical_drawing_rel_path_layer_2 = getattr(
-            config_data, "technical_drawing_path_layer_2", None
-        )
-        technical_drawing_rel_path_layer_3 = getattr(
-            config_data, "technical_drawing_path_layer_3", None
-        )
-        aruco_ref_rel_path = getattr(config_data, "aruco_reference_path", None)
-        training_rel_path = getattr(config_data, "training_path", None)
-        object_reference_rel_path = getattr(config_data, "object_reference_path", None)
+        # Extract from new nested config
+        color_config = config_data.color_correction
+        geo_config = config_data.geometrical_alignment
+        mask_config = config_data.masking
 
-        aruco_marker_map = getattr(config_data, "aruco_marker_map", {})
-        aruco_output_size = getattr(config_data, "aruco_output_size", [1000, 1000])
-
-        if not ref_color_checker_rel_path:
-            if debug_mode:
-                print(
-                    f"[DEBUG] 'reference_color_checker_path' not specified in project_config.json for project '{project_name}'."
-                )
+        # Resolve paths
+        ref_color_checker_path = project_path / color_config.reference_color_checker_path
+        if not ref_color_checker_path.is_file() and debug_mode:
+            print(f"[DEBUG] Reference color checker not found at {ref_color_checker_path}")
             ref_color_checker_path = None
-        else:
-            ref_color_checker_path = project_path / ref_color_checker_rel_path
-            if not ref_color_checker_path.is_file():
-                if debug_mode:
-                    print(
-                        f"[DEBUG] Reference color checker file not found at '{ref_color_checker_path}'."
-                    )
-                ref_color_checker_path = None
 
-        technical_drawing_path_layer_1 = (
-            project_path / technical_drawing_rel_path_layer_1
-            if technical_drawing_rel_path_layer_1
+        proj_spec_checker_path = (
+            project_path / color_config.project_specific_color_checker_path
+            if color_config.project_specific_color_checker_path
             else None
         )
-        if (
-            technical_drawing_path_layer_1
-            and not technical_drawing_path_layer_1.is_file()
-        ):
-            if debug_mode:
-                print(
-                    f"[DEBUG] Warning: Technical drawing layer 1 file not found at '{technical_drawing_path_layer_1}'."
-                )
-            technical_drawing_path_layer_1 = None
-
-        technical_drawing_path_layer_2 = (
-            project_path / technical_drawing_rel_path_layer_2
-            if technical_drawing_rel_path_layer_2
-            else None
-        )
-        if (
-            technical_drawing_path_layer_2
-            and not technical_drawing_path_layer_2.is_file()
-        ):
-            if debug_mode:
-                print(
-                    f"[DEBUG] Warning: Technical drawing layer 2 file not found at '{technical_drawing_path_layer_2}'."
-                )
-            technical_drawing_path_layer_2 = None
-
-        technical_drawing_path_layer_3 = (
-            project_path / technical_drawing_rel_path_layer_3
-            if technical_drawing_rel_path_layer_3
-            else None
-        )
-        if (
-            technical_drawing_path_layer_3
-            and not technical_drawing_path_layer_3.is_file()
-        ):
-            if debug_mode:
-                print(
-                    f"[DEBUG] Warning: Technical drawing layer 3 file not found at '{technical_drawing_path_layer_3}'."
-                )
-            technical_drawing_path_layer_3 = None
-
-        colorchecker_ref_for_project_paths = []
-        if colorchecker_ref_for_project_relative:
-            for rel_path in colorchecker_ref_for_project_relative:
-                full_path = project_path / rel_path
-                if full_path.is_file():
-                    colorchecker_ref_for_project_paths.append(full_path)
-                else:
-                    if debug_mode:
-                        print(
-                            f"[DEBUG] Warning: Color checker reference image '{rel_path}' not found for project '{project_name}'. Skipping."
-                        )
-
-        aruco_ref_path = (
-            project_path / aruco_ref_rel_path if aruco_ref_rel_path else None
-        )
-        if aruco_ref_path and not aruco_ref_path.is_file():
-            if debug_mode:
-                print(
-                    f"[DEBUG] Warning: ArUco reference file not found at '{aruco_ref_path}'."
-                )
-            aruco_ref_path = None
+        if proj_spec_checker_path and not proj_spec_checker_path.is_file() and debug_mode:
+            print(f"[DEBUG] Project specific checker not found at {proj_spec_checker_path}")
+            proj_spec_checker_path = None
 
         object_ref_path = (
-            project_path / object_reference_rel_path
-            if object_reference_rel_path
+            project_path / config_data.object_reference_path
+            if config_data.object_reference_path
             else None
         )
-        if object_ref_path and not object_ref_path.is_file():
-            if debug_mode:
-                print(
-                    f"[DEBUG] Warning: Object reference file not found at '{object_ref_path}'."
-                )
+        if object_ref_path and not object_ref_path.is_file() and debug_mode:
+            print(f"[DEBUG] Object reference not found at {object_ref_path}")
             object_ref_path = None
 
+        aruco_ref_path = (
+            project_path / geo_config.reference_path
+            if geo_config.reference_path
+            else None
+        )
+        if aruco_ref_path and not aruco_ref_path.is_file() and debug_mode:
+            print(f"[DEBUG] ArUco reference not found at {aruco_ref_path}")
+            aruco_ref_path = None
+
+        drawing_paths = {
+            key: project_path / path
+            for key, path in mask_config.drawing_layers.items()
+            if (project_path / path).is_file()
+        }
+
         training_image_configs = []
-        if training_rel_path:
-            training_path = project_path / training_rel_path
-            if not training_path.is_dir():
-                if debug_mode:
-                    print(
-                        f"[ERROR] The specified training path is not a valid directory: {training_path}"
-                    )
-            else:
+        if config_data.training_path:
+            training_path = project_path / config_data.training_path
+            if training_path.is_dir():
                 for item in training_path.iterdir():
-                    if item.is_file() and item.suffix.lower() in [
-                        ".png",
-                        ".jpg",
-                        ".jpeg",
-                    ]:
-                        img_config = next(
-                            (
-                                cfg
-                                for cfg in dataset_item_processing_config.image_configs
-                                if cfg.filename == item.name
-                            ),
-                            None,
-                        )
-                        if img_config:
-                            method = img_config.method
-                            points = img_config.points
-                            if method == "points" and not points:
-                                method = "full_average"
-                            points_as_dicts = (
-                                [p.model_dump() for p in points] if points else None
-                            )
-                            training_image_configs.append(
-                                {
-                                    "filename": item.name,
-                                    "path": item,
-                                    "method": method,
-                                    "points": points_as_dicts,
-                                }
-                            )
-                        else:
-                            training_image_configs.append(
-                                {
-                                    "filename": item.name,
-                                    "path": item,
-                                    "method": "full_average",
-                                }
-                            )
+                    if item.is_file() and item.suffix.lower() in [".png", ".jpg", ".jpeg"]:
+                        img_config = next((
+                            cfg for cfg in dataset_item_processing_config.image_configs if cfg.filename == item.name
+                        ), None)
+                        
+                        method = img_config.method if img_config else "full_average"
+                        points = img_config.points if img_config else None
+                        points_as_dicts = [p.model_dump() for p in points] if points else None
 
-        dataset_image_configs = []
-        dataset_path = project_path / "dataset"
+                        training_image_configs.append({
+                            "filename": item.name,
+                            "path": item,
+                            "method": method,
+                            "points": points_as_dicts,
+                        })
+            elif debug_mode:
+                print(f"[ERROR] The specified training path is not a valid directory: {training_path}")
 
         if debug_mode:
-            print(f"[DEBUG] Discovering samples in {dataset_path}")
-
-        if dataset_path.is_dir():
-            for item in dataset_path.iterdir():
-                if item.is_file() and item.suffix.lower() in [".png", ".jpg", ".jpeg"]:
-                    img_config = next(
-                        (
-                            cfg
-                            for cfg in dataset_item_processing_config.image_configs
-                            if cfg.filename == item.name
-                        ),
-                        None,
-                    )
-                    if img_config:
-                        method = img_config.method
-                        points = img_config.points
-                        if method == "points" and not points:
-                            method = "full_average"
-                        points_as_dicts = (
-                            [p.model_dump() for p in points] if points else None
-                        )
-                        dataset_image_configs.append(
-                            {
-                                "filename": item.name,
-                                "path": item,
-                                "method": method,
-                                "points": points_as_dicts,
-                            }
-                        )
-                    else:
-                        dataset_image_configs.append(
-                            {
-                                "filename": item.name,
-                                "path": item,
-                                "method": "full_average",
-                            }
-                        )
-
-        if not dataset_image_configs:
-            if debug_mode:
-                print(
-                    f"[DEBUG] Warning: No valid dataset images found for project '{project_name}'."
-                )
-
-        if debug_mode:
-            print(f"[DEBUG] Project '{project_name}' paths:")
-            print(f"[DEBUG]   Reference Color Checker: {ref_color_checker_path}")
-            print(
-                f"[DEBUG]   Color Checker Refs for Project: {colorchecker_ref_for_project_paths}"
-            )
-            print(f"[DEBUG]   Dataset Image Configurations: {dataset_image_configs}")
-            if technical_drawing_path_layer_1:
-                print(
-                    f"[DEBUG]   Technical Drawing Layer 1: {technical_drawing_path_layer_1}"
-                )
-            if technical_drawing_path_layer_2:
-                print(
-                    f"[DEBUG]   Technical Drawing Layer 2: {technical_drawing_path_layer_2}"
-                )
-            if technical_drawing_path_layer_3:
-                print(
-                    f"[DEBUG]   Technical Drawing Layer 3: {technical_drawing_path_layer_3}"
-                )
-            if aruco_ref_path:
-                print(f"[DEBUG]   ArUco Reference: {aruco_ref_path}")
-            if object_ref_path:
-                print(f"[DEBUG]   Object Reference: {object_ref_path}")
+            print(f"[DEBUG] Project '{project_name}' paths resolved:")
+            print(f"  - Ideal Color Checker: {ref_color_checker_path}")
+            print(f"  - Project Color Checker: {proj_spec_checker_path}")
+            print(f"  - Object Reference: {object_ref_path}")
+            print(f"  - ArUco Reference: {aruco_ref_path}")
+            print(f"  - Drawing Layers: {drawing_paths}")
 
         return {
             "reference_color_checker": ref_color_checker_path,
-            "colorchecker_reference_for_project": colorchecker_ref_for_project_paths,
-            "dataset_image_configs": dataset_image_configs,
+            "project_specific_color_checker": proj_spec_checker_path,
             "training_image_configs": training_image_configs,
-            "technical_drawing_layer_1": technical_drawing_path_layer_1,
-            "technical_drawing_layer_2": technical_drawing_path_layer_2,
-            "technical_drawing_layer_3": technical_drawing_path_layer_3,
-            "aruco_reference": aruco_ref_path,
+            "technical_drawing_paths": drawing_paths,
+            "geometrical_alignment_config": geo_config,
+            "geometrical_alignment_reference_path": aruco_ref_path,
             "object_reference_path": object_ref_path,
-            "aruco_marker_map": aruco_marker_map,
-            "aruco_output_size": aruco_output_size,
         }
 
     def get_hsv_colors_from_dataset(
@@ -489,114 +319,60 @@ class ProjectManager:
         return np.vstack(all_hsv_colors)
 
     def calculate_hsv_range_from_dataset(
-        self, dataset_image_configs: List[Dict], debug_mode: bool = False
+        self,
+        dataset_image_configs: List[Dict],
+        correction_matrix: np.ndarray = None,
+        debug_mode: bool = False
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]:
         """
-        Calculates a robust HSV color range (lower bound, upper bound, and center color)
-        from a collection of dataset image configurations.
-
-        This method processes each image configuration to extract HSV colors, then uses
-        statistical methods (interquartile range) to determine a robust bounding box
-        for the HSV values, mitigating the effect of outliers.
-
-        Args:
-            dataset_image_configs (List[Dict]): A list of dictionaries, each containing
-                                               'path' (Path to image), 'method' (e.g.,
-                                               "full_average", "points"), and optionally
-                                               'points' (List of point dictionaries).
-            debug_mode (bool): If True, prints debug information and collects detailed
-                               debug info for each processed sample.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]: A tuple containing:
-                - lower_limit (np.ndarray): A NumPy array [H, S, V] representing the
-                                            lower bounds of the calculated HSV range.
-                - upper_limit (np.ndarray): A NumPy array [H, S, V] representing the
-                                            upper bounds of the calculated HSV range.
-                - center_color (np.ndarray): A NumPy array [H, S, V] representing the
-                                             mean HSV color of the dataset.
-                - dataset_debug_info (List[Dict]): A list of dictionaries, each containing
-                                                   detailed information about how each
-                                                   sample image was processed and its
-                                                   extracted colors (useful for reporting).
-
-        Raises:
-            ValueError: If no dataset image configurations are provided, or if no valid
-                        HSV colors could be extracted from the configured images.
+        Calculates a robust HSV color range from a collection of dataset image configurations,
+        applying a color correction matrix to each image before color extraction.
         """
         all_hsv_colors = []
         dataset_debug_info = []
 
         if not dataset_image_configs:
-            raise ValueError(
-                "No dataset image configurations provided to calculate HSV range."
-            )
+            raise ValueError("No dataset image configurations provided to calculate HSV range.")
 
         if debug_mode:
-            print(
-                f"[DEBUG] Calculating HSV range from {len(dataset_image_configs)} sample image configurations."
-            )
+            print(f"[DEBUG] Calculating HSV range from {len(dataset_image_configs)} sample configs.")
 
         for img_config in dataset_image_configs:
-            dataset_item_file_path = img_config["path"]
-            method = img_config["method"]
-            points = img_config.get("points")
-
             try:
-                hsv_colors_for_sample = []
-                bgr_colors_for_sample = []
+                image_path = img_config["path"]
+                image, _ = load_image(str(image_path))
+                if image is None:
+                    if debug_mode: print(f"[DEBUG] Skipping {image_path.name}, could not load.")
+                    continue
 
-                if method == "full_average":
-                    avg_h, avg_s, avg_v = (
-                        self.dataset_item_processor.calculate_hsv_from_full_image(
-                            dataset_item_file_path
-                        )
+                # Apply color correction to the training image
+                corrected_image = image
+                if correction_matrix is not None:
+                    corrected_image = self.color_corrector.apply_correction_model(
+                        image, correction_matrix, method='linear'
                     )
-                    hsv_colors_for_sample.append((avg_h, avg_s, avg_v))
-                    all_hsv_colors.append((avg_h, avg_s, avg_v))
-                    if debug_mode:
-                        print(
-                            f"[DEBUG]   Processed {dataset_item_file_path.name} using full_average."
-                        )
 
-                elif method == "points":
-                    if not points:
-                        raise ValueError(
-                            f"Points not specified for {dataset_item_file_path.name} with 'points' method."
-                        )
-                    point_colors_hsv = (
-                        self.dataset_item_processor.calculate_hsv_from_points(
-                            dataset_item_file_path, points
-                        )
-                    )
-                    hsv_colors_for_sample.extend(point_colors_hsv)
-                    all_hsv_colors.extend(point_colors_hsv)
-                    if debug_mode:
-                        print(
-                            f"[DEBUG]   Processed {dataset_item_file_path.name} using points method with {len(points)} points."
-                        )
-
-                # Common logic for debug info
-                for hsv_color in hsv_colors_for_sample:
-                    hsv_for_debug = np.array([[list(hsv_color)]], dtype=np.uint8)
-                    bgr_color = cv2.cvtColor(hsv_for_debug, cv2.COLOR_HSV2BGR)[0][0]
-                    bgr_colors_for_sample.append(bgr_color.tolist())
-
-                dataset_debug_info.append(
-                    {
-                        "path": str(dataset_item_file_path),
-                        "method": method,
-                        "points": points,
-                        "bgr_colors": bgr_colors_for_sample,
-                        "hsv_colors": hsv_colors_for_sample,
-                    }
+                # Extract colors from the (potentially corrected) image
+                hsv_colors_for_sample = self.dataset_item_processor.extract_hsv_from_image(
+                    corrected_image, img_config["method"], img_config.get("points")
                 )
+                all_hsv_colors.extend(hsv_colors_for_sample)
+
+                if debug_mode:
+                    bgr_colors_for_sample = [
+                        cv2.cvtColor(np.uint8([[hsv]]), cv2.COLOR_HSV2BGR)[0][0] for hsv in hsv_colors_for_sample
+                    ]
+                    dataset_debug_info.append({
+                        "path": str(image_path),
+                        "method": img_config["method"],
+                        "points": img_config.get("points"),
+                        "bgr_colors": [c.tolist() for c in bgr_colors_for_sample],
+                        "hsv_colors": [c.tolist() for c in hsv_colors_for_sample],
+                    })
 
             except Exception as e:
                 if debug_mode:
-                    print(
-                        f"[DEBUG] Warning: Error processing dataset image {dataset_item_file_path.name}: {e}. Skipping."
-                    )
+                    print(f"[DEBUG] Warning: Error processing dataset image {img_config['path'].name}: {e}. Skipping.")
                 continue
 
         if not all_hsv_colors:
@@ -688,9 +464,11 @@ class ProjectManager:
         current_source_files.add(
             str(current_file_paths_dict["reference_color_checker"])
         )
-        for p in current_file_paths_dict["colorchecker_reference_for_project"]:
-            current_source_files.add(str(p))
-        for img_config in current_file_paths_dict["dataset_image_configs"]:
+        if current_file_paths_dict.get("project_specific_color_checker"):
+            current_source_files.add(
+                str(current_file_paths_dict["project_specific_color_checker"])
+            )
+        for img_config in current_file_paths_dict["training_image_configs"]:
             current_source_files.add(str(img_config["path"]))
             # Also add the sample_processing_config.json itself to the watched files
         current_source_files.add(
@@ -711,9 +489,9 @@ class ProjectManager:
 
                 # Deserialize NumPy arrays
                 correction_matrix_list = loaded_cache["data"]["correction_matrix"]
-                loaded_cache["data"]["correction_matrix"] = np.array(
-                    correction_matrix_list, dtype=np.float32
-                )
+                loaded_cache["data"]["correction_matrix"] = {
+                    "matrix": np.array(correction_matrix_list, dtype=np.float32)
+                }
                 loaded_cache["data"]["lower_hsv"] = np.array(
                     loaded_cache["data"]["lower_hsv"], dtype=np.uint8
                 )
@@ -776,18 +554,18 @@ class ProjectManager:
             print(f"[DEBUG] Calculating data for project '{project_name}'...")
         file_paths = self.get_project_file_paths(project_name, debug_mode=debug_mode)
 
-        # Calculate correction matrix
-        correction_matrix = np.eye(3, dtype=np.float32)  # Default to identity
-        if file_paths["colorchecker_reference_for_project"]:
-            # For simplicity, we'll use the first image in the list to calculate the matrix
-            # A more robust solution might average matrices from multiple images or use a more complex algorithm
-            source_image_path = file_paths["colorchecker_reference_for_project"][0]
+        correction_model = {'matrix': np.eye(3, dtype=np.float32)}  # Default to identity
+        if file_paths["project_specific_color_checker"] and file_paths["reference_color_checker"]:
+            source_image_path = file_paths["project_specific_color_checker"]
+            reference_image_path = file_paths["reference_color_checker"]
             try:
-                _, correction_matrix = self.color_corrector.correct_image_colors(
+                # correct_image_colors returns a dict, we need the matrix from it
+                result = self.color_corrector.correct_image_colors(
                     source_image_path=str(source_image_path),
-                    reference_image_path=str(file_paths["reference_color_checker"]),
+                    reference_image_path=str(reference_image_path),
                     debug_mode=debug_mode,
                 )
+                correction_model = result["correction_model"]
                 if debug_mode:
                     print("[DEBUG] Project color alignment matrix calculated.")
             except Exception as e:
@@ -796,10 +574,12 @@ class ProjectManager:
                         f"[DEBUG] Warning: Could not calculate project color alignment matrix: {e}. Using identity matrix."
                     )
 
-        # Calculate HSV range
+        # Calculate HSV range using the correction matrix
         lower_hsv, upper_hsv, center_hsv, dataset_debug_info = (
             self.calculate_hsv_range_from_dataset(
-                file_paths["training_image_configs"], debug_mode=debug_mode
+                file_paths["training_image_configs"], 
+                correction_matrix=correction_model, 
+                debug_mode=debug_mode
             )
         )
         if debug_mode:
@@ -807,34 +587,25 @@ class ProjectManager:
 
         # Store in cache
         source_file_timestamps = {}
-        for p in file_paths["colorchecker_reference_for_project"]:
+        if file_paths.get("project_specific_color_checker"):
+            p = file_paths["project_specific_color_checker"]
             source_file_timestamps[str(p)] = p.stat().st_mtime
-        source_file_timestamps[str(file_paths["reference_color_checker"])] = (
-            file_paths["reference_color_checker"].stat().st_mtime
-        )
-        for img_config in file_paths["dataset_image_configs"]:
-            source_file_timestamps[str(img_config["path"])] = (
-                img_config["path"].stat().st_mtime
-            )
-        source_file_timestamps[
-            str(self.projects_root / project_name / "project_config.json")
-        ] = (
-            (self.projects_root / project_name / "project_config.json").stat().st_mtime
-        )
-        source_file_timestamps[
-            str(
-                self.projects_root
-                / project_name
-                / "dataset_item_processing_config.json"
-            )
-        ] = (
-            (self.projects_root / project_name / "dataset_item_processing_config.json")
-            .stat()
-            .st_mtime
-        )
+        if file_paths.get("reference_color_checker"):
+            p = file_paths["reference_color_checker"]
+            source_file_timestamps[str(p)] = p.stat().st_mtime
+        
+        for img_config in file_paths["training_image_configs"]:
+            p = img_config["path"]
+            source_file_timestamps[str(p)] = p.stat().st_mtime
+
+        # Add config files to watched files for cache invalidation
+        project_config_path = self.projects_root / project_name / "project_config.json"
+        dataset_config_path = self.projects_root / project_name / "dataset_item_processing_config.json"
+        source_file_timestamps[str(project_config_path)] = project_config_path.stat().st_mtime
+        source_file_timestamps[str(dataset_config_path)] = dataset_config_path.stat().st_mtime
 
         cached_data_to_save = {
-            "correction_matrix": correction_matrix.tolist(),  # Convert NumPy array to list for JSON serialization
+            "correction_matrix": correction_model['matrix'].tolist(),  # Convert NumPy array to list for JSON serialization
             "lower_hsv": lower_hsv.tolist(),
             "upper_hsv": upper_hsv.tolist(),
             "center_hsv": center_hsv.tolist(),
@@ -852,10 +623,9 @@ class ProjectManager:
             print(f"[DEBUG] Cached data saved to {cache_file_path}")
 
         return {
-            "correction_matrix": correction_matrix,
+            "correction_matrix": correction_model,
             "lower_hsv": lower_hsv,
             "upper_hsv": upper_hsv,
             "center_hsv": center_hsv,
             "dataset_debug_info": dataset_debug_info,
         }
->>>>>>> Stashed changes

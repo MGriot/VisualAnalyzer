@@ -13,7 +13,7 @@ from typing import Tuple
 import datetime
 
 from src.utils.image_utils import load_image, save_image
-from src.alignment.aligner import Aligner
+from src.geometric_alignment.geometric_aligner import Aligner
 
 
 class ColorAnalyzer:
@@ -58,8 +58,9 @@ class ColorAnalyzer:
 
         if alpha_channel is not None:
             mask = cv2.bitwise_and(mask, mask, mask=alpha_channel)
-
-        negative_mask = cv2.bitwise_not(mask)
+            negative_mask = cv2.subtract(alpha_channel, mask)
+        else:
+            negative_mask = cv2.bitwise_not(mask)
 
         if debug_mode:
             print(
@@ -283,7 +284,17 @@ class ColorAnalyzer:
                 agg_density_thresh=agg_density_thresh,
                 debug_mode=debug_mode,
             )
-            negative_mask = cv2.bitwise_not(mask)
+
+            # After aggregation, the mask can expand into transparent areas.
+            # We must clip it to the analysis_mask to ensure correct statistics.
+            if analysis_mask is not None:
+                mask = cv2.bitwise_and(mask, analysis_mask)
+
+            # Recalculate the negative mask based on the final, clipped mask.
+            if analysis_mask is not None:
+                negative_mask = cv2.subtract(analysis_mask, mask)
+            else:
+                negative_mask = cv2.bitwise_not(mask)
 
         percentage, matched_pixels = self.calculate_statistics(
             mask, total_pixels, debug_mode=debug_mode

@@ -157,7 +157,7 @@ class MaskCreator:
 
 def create_and_apply_mask_from_layers(
     image_to_be_processed: np.ndarray,
-    project_files: dict,
+    drawing_paths: dict, # Changed from project_files
     masking_order: list,
     mask_bg_is_white: bool,
     output_dir: str,
@@ -188,8 +188,7 @@ def create_and_apply_mask_from_layers(
     debug_paths = []
 
     for layer_num in masking_order:
-        layer_key = f"technical_drawing_layer_{layer_num}"
-        drawing_path = project_files.get(layer_key)
+        drawing_path = drawing_paths.get(layer_num)
         if drawing_path:
             if debug_mode:
                 print(f"[DEBUG] Attempting to create mask from layer {layer_num} using file: {drawing_path}")

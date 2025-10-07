@@ -20,12 +20,7 @@ from src import config
 from src.reporting.archiver import ReportArchiver
 
 # Graceful imports for reporting libraries
-try:
-    from jinja2 import Environment, FileSystemLoader
-    from weasyprint import HTML
-    HAS_WEASYPRINT = True
-except ImportError:
-    HAS_WEASYPRINT = False
+
 
 try:
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak, Table, TableStyle
@@ -80,18 +75,7 @@ class ReportGenerator:
         
         os.makedirs(self.project_output_dir, exist_ok=True)
 
-        if HAS_WEASYPRINT:
-            self.env = Environment(loader=FileSystemLoader(config.TEMPLATES_DIR))
-            self.env.filters['basename'] = os.path.basename
-            template_name = "Report_Debug.html" if debug_mode else "Report_Default.html"
-            try:
-                self.template = self.env.get_template(template_name)
-            except Exception as e:
-                print(f"[WARNING] Could not load template {template_name}: {e}")
-                self.template = None
-        else:
-            self.env = None
-            self.template = None
+
 
     def get_step_output_dir(self, step_name: str) -> Path:
         """
@@ -125,15 +109,36 @@ class ReportGenerator:
             str: The relative path to the generated pie chart image.
         """
         step_dir = self.get_step_output_dir("reporting")
-        labels = ["Matched Pixels", "Unmatched Pixels"]
-        sizes = [matched_pixels, total_pixels - matched_pixels]
-        
-        # Use the rgb value from the first selected color
-        pie_color = [0.5, 0.5, 0.5] # Default gray
+
+        # Ensure unmatched_pixels is not negative, guarding against external bugs.
+        unmatched_pixels = max(0, total_pixels - matched_pixels)
+
+        labels = []
+        sizes = []
+        colors_pie = []
+
+        # Define the color for the 'Matched' slice
+        pie_color = [0.5, 0.5, 0.5]  # Default gray
         if selected_colors and 'rgb' in selected_colors[0]:
             pie_color = np.array(selected_colors[0]['rgb']) / 255.0
 
-        colors_pie = [pie_color, "darkgray"]
+        # Add slices to the pie chart only if they have a size greater than zero
+        if matched_pixels > 0:
+            labels.append("Matched Pixels")
+            sizes.append(matched_pixels)
+            colors_pie.append(pie_color)
+
+        if unmatched_pixels > 0:
+            labels.append("Unmatched Pixels")
+            sizes.append(unmatched_pixels)
+            colors_pie.append("darkgray")
+
+        # Handle the case where there is no data to show
+        if not sizes:
+            labels = ['No pixels analyzed']
+            sizes = [1]
+            colors_pie = ['lightgray']
+
         plt.pie(sizes, labels=labels, colors=colors_pie, autopct="%1.1f%%", startangle=140)
         plt.axis("equal")
         pie_chart_path = step_dir / "pie_chart.png"
@@ -399,7 +404,7 @@ class ReportGenerator:
         add_image('pie_chart_path', 'Pixel-Percentage Pie Chart', width=4*inch)
 
         # --- Debug Section ---
-        if report_data.get("debug_data"):
+        if self.debug_mode and "debug_data" in report_data:
             debug_data = report_data["debug_data"]
             story.append(PageBreak())
             story.append(Paragraph("Debug Report", title_style))
@@ -496,7 +501,7 @@ class ReportGenerator:
         if self.debug_mode:
             print(f"ReportLab PDF report saved to {pdf_path}")
 
-    def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None, report_type: str = 'all'):
+    def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None):
         """
         Generates all specified report files (HTML, PDF) from the analysis results.
 
@@ -508,8 +513,6 @@ class ReportGenerator:
             metadata (dict): A dictionary containing metadata for the report (e.g., part number, thickness).
             debug_data (dict, optional): A dictionary containing additional debug information
                                          to be included in the report. Defaults to None.
-            report_type (str, optional): The type of report(s) to generate. Can be 'html',
-                                         'reportlab', or 'all'. Defaults to 'all'.
 
         Returns:
             dict: The dictionary of template variables used to generate the report.
@@ -550,7 +553,6 @@ class ReportGenerator:
             "debug_data": debug_data,
             "dataset_debug_info": processed_dataset_info,
             "dataset_color_space_plot_path": dataset_color_space_plot_path,
-            "report_type": report_type,
         }
 
         template_vars['analysis_results_raw'] = analysis_results
@@ -584,38 +586,18 @@ class ReportGenerator:
             is_regeneration (bool, optional): If True, prefixes output filenames with "regenerated_".
                                              Defaults to True.
         """
-        report_type = report_data.get('report_type', 'all')
-        prefix = ""
-        if self.debug_mode:
-            prefix += "debug_"
-        if is_regeneration:
-            prefix += "regenerated_"
-        part_number = report_data.get('part_number', 'report')
-
-        # HTML and WeasyPrint PDF Generation
-        if report_type in ['html', 'all']:
-            if HAS_WEASYPRINT and self.template:
-                html_content = self.template.render(report_data)
-                report_html_path = self.project_output_dir / f"{prefix}{part_number}.html"
-                report_pdf_path = self.project_output_dir / f"{prefix}{part_number}.pdf"
-
-                with open(report_html_path, "w", encoding='utf-8') as f: f.write(html_content)
-                if self.debug_mode:
-                    print(f"HTML report saved to {report_html_path}")
-
-                HTML(string=html_content, base_url=str(base_dir)).write_pdf(report_pdf_path)
-                if self.debug_mode:
-                    print(f"PDF report saved to {report_pdf_path}")
-            elif not HAS_WEASYPRINT:
-                print("[WARNING] jinja2 and/or weasyprint not installed. Skipping HTML/WeasyPrint PDF generation.")
-
         # ReportLab PDF Generation
-        if report_type in ['reportlab', 'all']:
-            if HAS_REPORTLAB:
-                reportlab_pdf_path = self.project_output_dir / f"{prefix}{part_number}_reportlab.pdf"
-                try:
-                    self._generate_reportlab_pdf(report_data, base_dir, reportlab_pdf_path)
-                except Exception as e:
-                    print(f"[WARNING] Failed to generate ReportLab PDF: {e}")
-            else:
-                print("[WARNING] reportlab not installed. Skipping ReportLab PDF generation.")
+        prefix = ""
+        if is_regeneration:
+            prefix = "regenerated_"
+        elif self.debug_mode:
+            prefix = "debug_"
+        part_number = report_data.get("part_number", "report")
+        if HAS_REPORTLAB:
+            reportlab_pdf_path = self.project_output_dir / f"{prefix}{part_number}_reportlab.pdf"
+            try:
+                self._generate_reportlab_pdf(report_data, base_dir, reportlab_pdf_path)
+            except Exception as e:
+                print(f"[WARNING] Failed to generate ReportLab PDF: {e}")
+        else:
+            print("[WARNING] reportlab not installed. Skipping ReportLab PDF generation.")

@@ -1,8 +1,3 @@
-<<<<<<< Updated upstream
-version https://git-lfs.github.com/spec/v1
-oid sha256:552350ba76e9997034f7cfe10d1701371bd14e31a2e0829f361ddd0baec7a59a
-size 19223
-=======
 """
 This module defines the main analysis pipeline for the Visual Analyzer application.
 
@@ -41,7 +36,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
 from src.project_manager import ProjectManager
 from src.color_analysis.analyzer import ColorAnalyzer
 from src.color_correction.corrector import ColorCorrector
-from src.alignment.aligner import Aligner
+from src.geometric_alignment.geometric_aligner import Aligner
 from src.object_alignment.object_aligner import AdvancedAligner
 from src.masking.creator import MaskCreator
 from src.reporting.generator import ReportGenerator
@@ -190,48 +185,91 @@ class Pipeline:
         if not self.args.skip_report_generation:
             self.generate_report()
 
+
     def _perform_color_correction(self):
+        """
+        Applies color correction. Prioritizes on-the-fly correction using a sample-specific
+        color checker if provided, otherwise falls back to the pre-calculated project matrix.
+        """
         step_dir = self.report_generator.get_step_output_dir("color_correction")
+        correction_matrix = self.project_data.get("correction_matrix")
+        project_files = self.project_manager.get_project_file_paths(self.args.project, self.args.debug)
 
-        correction_result = self.color_corrector.apply_color_correction(
-            self.image_to_be_processed,
-            self.project_data["correction_matrix"],
-            output_dir=step_dir,
-        )
+        # Scenario 1: On-the-fly correction with a sample-specific checker
+        if self.args.sample_color_checker and os.path.exists(self.args.sample_color_checker):
+            ideal_checker_path = project_files.get("reference_color_checker")
+            if not ideal_checker_path:
+                print("[WARNING] Cannot perform on-the-fly correction: ideal reference_color_checker_path not set in project.")
+            else:
+                if self.args.debug:
+                    print(f"[DEBUG] Performing on-the-fly color correction using sample checker: {self.args.sample_color_checker}")
+                try:
+                    # The matrix is calculated from the sample checker vs the ideal checker
+                    calc_result = self.color_corrector.correct_image_colors(
+                        source_image_path=self.args.sample_color_checker,
+                        reference_image_path=str(ideal_checker_path),
+                        output_dir=step_dir,
+                        debug_mode=self.args.debug,
+                        method=self.args.color_correction_method
+                    )
+                    correction_matrix = calc_result["correction_matrix"]
+                    self.debug_data_for_report["color_correction_matrix_calculated_on_the_fly"] = correction_matrix.tolist()
+                except Exception as e:
+                    print(f"[WARNING] On-the-fly color correction failed: {e}. No correction will be applied.")
+                    correction_matrix = None # Ensure no correction is applied on failure
 
-        self.image_to_be_processed = correction_result["image"]
-        self.pipeline_image_stages["color_corrected"] = (
-            self.image_to_be_processed.copy()
-        )
-
-        if self.args.debug and correction_result["debug_path"]:
-            self.debug_image_pipeline.append(
-                {
-                    "title": f"{self.pipeline_step_counter}. After Color Correction",
-                    "path": os.path.relpath(
-                        correction_result["debug_path"],
-                        self.report_generator.project_output_dir,
-                    ),
-                }
+        # Scenario 2: Apply the pre-calculated project matrix
+        elif correction_matrix is not None:
+            if self.args.debug:
+                print("[DEBUG] Applying pre-calculated project color correction matrix.")
+                self.debug_data_for_report["color_correction_matrix_used"] = np.array(correction_matrix).tolist()
+        
+        # Apply the determined matrix (if any)
+        if correction_matrix is not None:
+            correction_result = self.color_corrector.apply_color_correction(
+                self.image_to_be_processed,
+                np.array(correction_matrix),
+                output_dir=step_dir,
             )
-            self.pipeline_step_counter += 1
-
+            self.image_to_be_processed = correction_result["image"]
+            self.pipeline_image_stages["color_corrected"] = self.image_to_be_processed.copy()
+            if self.args.debug and correction_result["debug_path"]:
+                self.debug_image_pipeline.append({
+                    "title": f"{self.pipeline_step_counter}. Final Image After Color Correction",
+                    "path": os.path.relpath(correction_result["debug_path"], self.report_generator.project_output_dir),
+                })
+                self.pipeline_step_counter += 1
+        elif self.args.debug:
+            print("[DEBUG] No color correction matrix available or calculated. Skipping step.")
     def _perform_geometrical_alignment(self):
         step_dir = self.report_generator.get_step_output_dir("geometrical_alignment")
         aligner = Aligner(debug_mode=self.args.debug, output_dir=step_dir)
+
+        # Get file paths and config objects from the project manager
         project_files = self.project_manager.get_project_file_paths(
             self.args.project, self.args.debug
         )
 
-        aruco_ref_path = project_files.get("aruco_reference")
-        marker_map = project_files.get("aruco_marker_map")
-        output_size = project_files.get("aruco_output_size")
+        # Get the specific config object for this step
+        geo_config = project_files.get("geometrical_alignment_config")
+        if not geo_config:
+            if self.args.debug:
+                print(
+                    "[DEBUG] No geometrical alignment config found in project_files. Skipping step."
+                )
+            return
+
+        if self.args.debug:
+            print(
+                f"[DEBUG] Available keys in project_files: {list(project_files.keys())}"
+            )
+        aruco_ref_path = project_files.get("geometrical_alignment_reference_path")
 
         result = aligner.align_image(
             image=self.image_to_be_processed,
             aruco_reference_path=str(aruco_ref_path) if aruco_ref_path else None,
-            marker_map=marker_map if marker_map else None,
-            output_size_wh=output_size,
+            marker_map=geo_config.marker_map,
+            output_size_wh=geo_config.output_size,
         )
 
         if result and result.get("image") is not None:
@@ -266,6 +304,16 @@ class Pipeline:
             )
 
     def _perform_object_alignment(self):
+        """
+        Performs object alignment by calling the self-contained AdvancedAligner.
+
+        The aligner is responsible for all its own logic and debug image generation.
+        This method's role is to call the aligner and integrate its results and
+        debug data back into the main pipeline workflow.
+        """
+        if self.args.debug:
+            print("[DEBUG] Entering object alignment step...")
+
         step_dir = self.report_generator.get_step_output_dir("object_alignment")
         project_files = self.project_manager.get_project_file_paths(
             self.args.project, self.args.debug
@@ -275,7 +323,7 @@ class Pipeline:
         if not object_ref_path:
             if self.args.debug:
                 print(
-                    "[DEBUG] No object reference path specified. Skipping object alignment."
+                    "[DEBUG] No object reference path found in project config. Skipping object alignment."
                 )
             return
 
@@ -287,36 +335,31 @@ class Pipeline:
                 )
             return
 
+        # Instantiate the aligner, which will manage its own state and debug output.
         advanced_aligner = AdvancedAligner(
             debug_mode=self.args.debug, output_dir=step_dir
         )
+
+        # Call the aligner, telling it which shadow method to use.
+        # Safely access the shadow removal argument, defaulting to 'none'.
+        shadow_removal_method = getattr(self.args, "object_alignment_shadow_removal", "none")
+        if self.args.debug and not hasattr(self.args, "object_alignment_shadow_removal"):
+            print("[DEBUG] 'object_alignment_shadow_removal' argument not found, defaulting to 'none'.")
+
         result = advanced_aligner.align(
-            self.image_to_be_processed, ref_image, method="geometric_shape"
+            self.image_to_be_processed,
+            ref_image,
+            shadow_removal=shadow_removal_method,
         )
 
-        if result and result.get("image") is not None:
-            self.image_to_be_processed = result["image"]
-            self.pipeline_image_stages["object_aligned"] = (
-                self.image_to_be_processed.copy()
-            )
-
-            if self.args.debug and result.get("debug_paths"):
-                debug_paths = result["debug_paths"]
-                # Store statistics
-                if "good_feature_matches" in debug_paths:
-                    self.debug_data_for_report["object_alignment_stats"] = {
-                        "good_feature_matches": debug_paths["good_feature_matches"]
-                    }
-
-                # Store images for report
-                path_titles = {
-                    "feature_matches_image": "Feature Matches",
-                    "final_aligned": "After Object Alignment",
-                }
-                for key, path in debug_paths.items():
-                    if not isinstance(path, str):
-                        continue  # Skip non-path values like stats
-                    title = path_titles.get(key, key.replace("_", " ").title())
+        # Process ALL debug paths returned by the aligner, whatever they may be.
+        if self.args.debug and result.get("debug_paths"):
+            # Sort by key to maintain the logical numbered order (e.g., "00_", "01_") in the report.
+            sorted_paths = sorted(result["debug_paths"].items())
+            for key, path in sorted_paths:
+                if isinstance(path, str) and os.path.exists(path):
+                    # Create a user-friendly title from the filename key
+                    title = key.replace("_", " ").title()
                     self.debug_image_pipeline.append(
                         {
                             "title": f"{self.pipeline_step_counter}. OA: {title}",
@@ -326,8 +369,26 @@ class Pipeline:
                         }
                     )
                     self.pipeline_step_counter += 1
-        elif self.args.debug:
-            print("[WARNING] Object alignment failed. Proceeding with unaligned image.")
+
+        # Update the pipeline's image and data only on success.
+        if result and result.get("image") is not None:
+            if self.args.debug:
+                print(
+                    "[DEBUG] Object alignment successful. Updating image for next step."
+                )
+            self.image_to_be_processed = result["image"]
+            self.pipeline_image_stages["object_aligned"] = (
+                self.image_to_be_processed.copy()
+            )
+            if result.get("transform_matrix") is not None:
+                self.debug_data_for_report["object_alignment_matrix"] = result[
+                    "transform_matrix"
+                ]
+        else:
+            if self.args.debug:
+                print(
+                    "[WARNING] Object alignment core logic failed. Proceeding with unaligned image."
+                )
 
     def _apply_masking(self):
         step_dir = self.report_generator.get_step_output_dir("masking")
@@ -350,9 +411,10 @@ class Pipeline:
         # Defer all logic to the self-contained function in the masking module.
         from src.masking.creator import create_and_apply_mask_from_layers
 
+        # Pass the new technical_drawing_paths dictionary
         result = create_and_apply_mask_from_layers(
             image_to_be_processed=self.image_to_be_processed,
-            project_files=project_files,
+            drawing_paths=project_files.get("technical_drawing_paths", {}),
             masking_order=masking_order,
             mask_bg_is_white=self.args.mask_bg_is_white,
             output_dir=step_dir,
@@ -500,7 +562,6 @@ class Pipeline:
             self.analysis_results,
             self.metadata,
             debug_data=self.debug_data_for_report,
-            report_type=self.args.report_type,
         )
         return report_data
 
@@ -565,4 +626,3 @@ def process_video(args, pipeline):
     if args.debug:
         print(f"Processing video: {args.video}")
     # ... (original process_video logic adapted to use the pipeline object)
->>>>>>> Stashed changes

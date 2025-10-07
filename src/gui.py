@@ -1,8 +1,3 @@
-<<<<<<< Updated upstream
-version https://git-lfs.github.com/spec/v1
-oid sha256:d242faf3c1e55cf0404fc8ea061bb30ec531c3c383db6191647989bb5897b0fe
-size 14807
-=======
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 import argparse
@@ -16,6 +11,7 @@ from src.pipeline import run_analysis
 from src.project_manager import ProjectManager
 from src.create_project import create_project
 from src.sample_manager.dataset_gui import DatasetManagerGUI
+from src.sample_manager.file_placer_gui import ProjectFilePlacerGUI
 
 
 class VisualAnalyzerGUI(tk.Tk):
@@ -47,7 +43,7 @@ class VisualAnalyzerGUI(tk.Tk):
         self.project_var = tk.StringVar()
         self.image_path_var = tk.StringVar()
         self.color_checker_path_var = tk.StringVar()
-        self.report_type_var = tk.StringVar(value="reportlab")
+        self.color_correction_method_var = tk.StringVar(value="linear")
         self.masking_order_var = tk.StringVar(value="1-2-3")
         self.blur_kernel_var = tk.StringVar(value="5 5")
         self.agg_kernel_size_var = tk.StringVar(value="7")
@@ -59,6 +55,7 @@ class VisualAnalyzerGUI(tk.Tk):
         self.debug_var = tk.BooleanVar()
         self.alignment_var = tk.BooleanVar(value=True)
         self.object_alignment_var = tk.BooleanVar(value=True)
+        self.object_alignment_shadow_removal_var = tk.BooleanVar(value=False)
         self.apply_mask_var = tk.BooleanVar(value=True)
         self.mask_bg_is_white_var = tk.BooleanVar(value=False)
         self.blur_var = tk.BooleanVar(value=True)
@@ -111,11 +108,27 @@ class VisualAnalyzerGUI(tk.Tk):
             tk.Checkbutton(
                 bool_frame, text="Color Alignment", variable=self.color_alignment_var
             ).pack(anchor=tk.W)
+            cc_sub_frame = ttk.Frame(bool_frame)
+            cc_sub_frame.pack(anchor=tk.W, fill=tk.X, padx=(20, 0))
+            tk.Label(cc_sub_frame, text="Method:").pack(side=tk.LEFT)
+            ttk.Combobox(
+                cc_sub_frame,
+                textvariable=self.color_correction_method_var,
+                values=["linear", "polynomial", "hsv", "histogram"],
+                width=15,
+            ).pack(side=tk.LEFT, padx=5)
             tk.Checkbutton(
                 bool_frame, text="Geometrical Alignment", variable=self.alignment_var
             ).pack(anchor=tk.W)
             tk.Checkbutton(
                 bool_frame, text="Object Alignment", variable=self.object_alignment_var
+            ).pack(anchor=tk.W)
+            object_alignment_sub_frame = ttk.Frame(bool_frame)
+            object_alignment_sub_frame.pack(anchor=tk.W, fill=tk.X, padx=(20, 0))
+            tk.Checkbutton(
+                object_alignment_sub_frame,
+                text="Shadow Removal",
+                variable=self.object_alignment_shadow_removal_var,
             ).pack(anchor=tk.W)
 
             tk.Checkbutton(
@@ -137,12 +150,7 @@ class VisualAnalyzerGUI(tk.Tk):
             param_frame = ttk.Frame(grid_frame)
             param_frame.grid(row=0, column=1, sticky="new")
 
-            tk.Label(param_frame, text="Report Type:").pack(anchor=tk.W)
-            ttk.Combobox(
-                param_frame,
-                textvariable=self.report_type_var,
-                values=["html", "reportlab", "all"],
-            ).pack(anchor=tk.W, fill=tk.X)
+
 
             tk.Label(param_frame, text="Masking Order (e.g., 1-2-3):").pack(
                 anchor=tk.W, pady=(5, 0)
@@ -230,7 +238,11 @@ class VisualAnalyzerGUI(tk.Tk):
             self.manage_project_combobox.set(self.available_projects[0])
 
         tk.Button(
-            manage_frame, text="Launch Manager", command=self.launch_dataset_manager
+            manage_frame, text="Launch Point Selector", command=self.launch_dataset_manager
+        ).pack(side=tk.LEFT, padx=5, pady=5)
+
+        tk.Button(
+            manage_frame, text="Setup Project Files", command=self.launch_file_placer
         ).pack(side=tk.LEFT, padx=5, pady=5)
 
     def handle_create_project(self):
@@ -249,6 +261,15 @@ class VisualAnalyzerGUI(tk.Tk):
         self.available_projects = self.project_manager.list_projects()
         self.project_combobox["values"] = self.available_projects
         self.manage_project_combobox["values"] = self.available_projects
+
+    def launch_file_placer(self):
+        project_name = self.manage_project_var.get()
+        if not project_name:
+            messagebox.showerror("Error", "Please select a project.")
+            return
+        
+        file_placer_window = ProjectFilePlacerGUI(self, project_name)
+        self.wait_window(file_placer_window)
 
     def launch_dataset_manager(self):
         project_name = self.manage_project_var.get()
@@ -327,6 +348,7 @@ class VisualAnalyzerGUI(tk.Tk):
         args.camera = False
         args.drawing = None
         args.color_alignment = self.color_alignment_var.get()
+        args.color_correction_method = self.color_correction_method_var.get()
         args.sample_color_checker = (
             self.color_checker_path_var.get() if args.color_alignment else None
         )
@@ -340,10 +362,12 @@ class VisualAnalyzerGUI(tk.Tk):
         args.blur = self.blur_var.get()
         args.alignment = self.alignment_var.get()
         args.object_alignment = self.object_alignment_var.get()
+        args.object_alignment_shadow_removal = (
+            self.object_alignment_shadow_removal_var.get()
+        )
         args.apply_mask = self.apply_mask_var.get()
         args.mask_bg_is_white = self.mask_bg_is_white_var.get()
         args.symmetry = self.symmetry_var.get()
-        args.report_type = self.report_type_var.get()
         args.masking_order = self.masking_order_var.get()
 
         # Add missing arguments from pipeline refactoring
@@ -402,4 +426,3 @@ if __name__ == "__main__":
     gui_args = parser.parse_args()
     app = VisualAnalyzerGUI(debug_mode=gui_args.debug)
     app.mainloop()
->>>>>>> Stashed changes

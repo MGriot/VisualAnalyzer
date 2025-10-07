@@ -1,76 +1,71 @@
-<<<<<<< Updated upstream
-version https://git-lfs.github.com/spec/v1
-oid sha256:d89ff875b4634c50c3db57408c707027b63e780422541cb7ce98c3372f5818c6
-size 19138
-=======
 """
-This module provides the `AdvancedAligner` class for robust image alignment
+This module provides the AdvancedAligner class for robust image alignment
 using various computer vision techniques.
 
-It supports feature-based alignment (ORB/SIFT), ECC maximization,
-contour centroid alignment, and a new default method based on circumscribed
-geometric shapes, prioritizing pentagons and falling back to quadrilaterals.
+It supports feature-based alignment (ORB/SIFT), a robust method based on
+contour pose estimation, and a new default geometric method that prioritizes
+a 5-point pentagon and falls back to a 4-point quadrilateral.
 """
 
 import cv2
 import numpy as np
 import os
-from src.utils.image_utils import save_image
+import math
 
-# This class is well-formed and requires no corrections.
-# Ensure it is defined or imported before calling the align_image function.
+
+def save_image(path, image):
+    """
+    Saves an image to a specified path, creating directories if they don't exist.
+
+    Args:
+        path (str): The full path where the image will be saved.
+        image (np.ndarray): The image data to save.
+    """
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        cv2.imwrite(path, image)
+    except Exception as e:
+        print(f"Error saving image to {path}: {e}")
 
 
 class AdvancedAligner:
     """
-    A comprehensive image aligner class offering various alignment methods.
+    A comprehensive image aligner that offers various alignment methods.
 
-    The default method, 'geometric_shape', attempts to align using a 5-point
+    The new default method, 'geometric_shape', attempts to align using a 5-point
     pentagon circumscribed around the object, falling back to a 4-point
     quadrilateral if a pentagon is not detected.
+
+    Args:
+        max_features (int): Maximum features to detect for ORB/SIFT.
+        min_contour_area (int): The minimum area for a contour to be considered valid.
+        poly_epsilon_ratio (float): Ratio for approximating polygons. Crucial for pentagon detection.
+        debug_mode (bool): If True, saves intermediate images for debugging.
+        output_dir (str): Directory to save debug images. Required if `debug_mode` is True.
+        default_align_method (str): The default alignment method to use.
+        shadow_removal_method (str): The default shadow removal technique.
     """
 
     def __init__(
         self,
         max_features=2000,
-        good_match_percent=0.15,
-        motion_model="homography",
-        ecc_iters=5000,
-        ecc_eps=1e-8,
         min_contour_area=100,
-        poly_epsilon_ratio=0.02,  # Crucial for polygon approximation
-        edge_method="canny",
-        corner_method="shi-tomasi",
+        poly_epsilon_ratio=0.02,
         debug_mode=False,
         output_dir=None,
-        default_align_method="geometric_shape",
+        default_align_method="geometric_shape",  # Changed default to the new method
+        shadow_removal_method="clahe",
     ):
-        """
-        Initializes the AdvancedAligner.
-
-        Args:
-            max_features (int): Max keypoints for ORB/SIFT.
-            good_match_percent (float): Fraction of good feature matches.
-            motion_model (str): Transform model ('affine', 'homography'). Defaults to "homography".
-            min_contour_area (int): Minimum contour area for detection.
-            poly_epsilon_ratio (float): Approximation precision for simplifying contours
-                                        into polygons. A key parameter for pentagon detection.
-            debug_mode (bool): Enables saving of intermediate debug images.
-            output_dir (str): Directory to save debug images.
-            default_align_method (str): Default alignment method. Defaults to "geometric_shape".
-        """
         self.max_features = max_features
-        self.good_match_percent = good_match_percent
-        self.motion_model = motion_model
-        self.ecc_iters = ecc_iters
-        self.ecc_eps = ecc_eps
         self.min_contour_area = min_contour_area
         self.poly_epsilon_ratio = poly_epsilon_ratio
-        self.edge_method = edge_method
-        self.corner_method = corner_method
         self.debug_mode = debug_mode
         self.output_dir = output_dir
         self.default_align_method = default_align_method
+        self.shadow_removal_method = shadow_removal_method
+
+        if self.debug_mode and not self.output_dir:
+            raise ValueError("output_dir must be provided when debug_mode is True.")
 
         self.orb = (
             cv2.ORB_create(self.max_features) if hasattr(cv2, "ORB_create") else None
@@ -79,14 +74,46 @@ class AdvancedAligner:
             cv2.SIFT_create(self.max_features) if hasattr(cv2, "SIFT_create") else None
         )
 
-    def _find_largest_contour(self, img):
-        """Helper to find the largest contour in an image."""
-        gray = self.preprocess_gray(img)
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    def _save_debug_image(self, name, image, debug_paths):
+        """Saves a debug image if debug_mode is enabled."""
+        if self.debug_mode and self.output_dir:
+            path = os.path.join(self.output_dir, f"debug_{name}.png")
+            save_image(path, image)
+            debug_paths[name] = path
 
-        # Add a dilation step to close small gaps in the object
+    def _apply_clahe_contrast(self, img):
+        """Enhances contrast using CLAHE in the L*a*b* color space."""
+        if len(img.shape) != 3:
+            return img
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        l_enhanced = clahe.apply(l)
+        lab_enhanced = cv2.merge((l_enhanced, a, b))
+        return cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
+
+    def _apply_simple_gamma(self, img, gamma=1.5):
+        """Applies a simple gamma correction to brighten the image."""
+        inv_gamma = 1.0 / gamma
+        table = np.array(
+            [((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]
+        ).astype("uint8")
+        return cv2.LUT(img, table)
+
+    def _find_largest_contour(self, img):
+        """
+        Helper to find the largest contour in an image after preprocessing.
+        (Updated with logic from the new file for better contour detection).
+        """
+        gray = (
+            cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img.copy()
+        )
+        # Use OTSU's thresholding for robust binarization
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        # Use morphological closing to fill gaps
         kernel = np.ones((5, 5), np.uint8)
-        binary = cv2.dilate(binary, kernel, iterations=1)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
 
         contours, _ = cv2.findContours(
             binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
@@ -98,25 +125,27 @@ class AdvancedAligner:
             return None
         return max(valid_contours, key=cv2.contourArea)
 
+    # --- NEW HELPER METHODS for POINT ORDERING ---
     def _order_points_quad(self, pts):
         """
         Sorts 4 points for a quadrilateral in a consistent order:
         top-left, top-right, bottom-right, bottom-left.
+        This ensures correct orientation mapping.
         """
         pts = pts.reshape(4, 2)
         rect = np.zeros((4, 2), dtype="float32")
         s = pts.sum(axis=1)
-        rect[0] = pts[np.argmin(s)]
-        rect[2] = pts[np.argmax(s)]
+        rect[0] = pts[np.argmin(s)]  # Top-left has smallest sum
+        rect[2] = pts[np.argmax(s)]  # Bottom-right has largest sum
         diff = np.diff(pts, axis=1)
-        rect[1] = pts[np.argmin(diff)]
-        rect[3] = pts[np.argmax(diff)]
+        rect[1] = pts[np.argmin(diff)]  # Top-right has smallest difference
+        rect[3] = pts[np.argmax(diff)]  # Bottom-left has largest difference
         return rect
 
     def _order_polygon_points(self, pts):
         """
         Sorts vertices of a convex polygon into clockwise order using their
-        angle with respect to the centroid.
+        angle with respect to the centroid. This works for any N-sided polygon.
         """
         pts = pts.reshape(-1, 2)
         centroid = np.mean(pts, axis=0)
@@ -126,79 +155,16 @@ class AdvancedAligner:
         )
         return np.array(sorted_pts, dtype="float32")
 
-    def preprocess_gray(self, img):
-        if len(img.shape) == 3:
-            return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        return img.copy()
-
-    def align_by_feature(self, img_to_align, ref_img, use_sift=False):
-        """Aligns images using feature detection (ORB or SIFT)."""
-        # (This method remains unchanged)
-        detector = self.sift if use_sift and self.sift else self.orb
-        if detector is None:
-            raise RuntimeError("Selected feature detector not available.")
-        norm = cv2.NORM_L2 if use_sift and self.sift else cv2.NORM_HAMMING
-
-        gray_to_align, gray_ref = self.preprocess_gray(
-            img_to_align
-        ), self.preprocess_gray(ref_img)
-        kp1, des1 = detector.detectAndCompute(gray_to_align, None)
-        kp2, des2 = detector.detectAndCompute(gray_ref, None)
-
-        if des1 is None or des2 is None:
-            return None, {}
-
-        bf = cv2.BFMatcher(norm, crossCheck=False)
-        matches = bf.knnMatch(des1, des2, k=2)
-        good_matches = [
-            m
-            for m, n in matches
-            if len(matches[0]) == 2 and m.distance < 0.75 * n.distance
-        ]
-
-        debug_paths = {}
-        if self.debug_mode and self.output_dir and good_matches:
-            img_matches = cv2.drawMatches(
-                img_to_align, kp1, ref_img, kp2, good_matches, None
-            )
-            debug_paths["feature_matches"] = os.path.join(
-                self.output_dir, "debug_feature_matches.png"
-            )
-            save_image(debug_paths["feature_matches"], img_matches)
-
-        if len(good_matches) < 10:
-            return None, debug_paths
-
-        src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(
-            -1, 1, 2
-        )
-        dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(
-            -1, 1, 2
-        )
-
-        M, _ = (
-            cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-            if self.motion_model == "homography"
-            else cv2.estimateAffine2D(src_pts, dst_pts)
-        )
-        if M is None:
-            return None, debug_paths
-
-        h, w = ref_img.shape[:2]
-        warp_func = (
-            cv2.warpPerspective if self.motion_model == "homography" else cv2.warpAffine
-        )
-        return warp_func(img_to_align, M, (w, h)), debug_paths
-
-    def align_by_geometric_shape(self, src, ref):
+    # --- NEW ALIGNMENT METHOD ---
+    def align_by_geometric_shape(self, src_processed, ref_processed):
         """
         Aligns images by circumscribing the object with a polygon.
         It prioritizes a 5-vertex pentagon and falls back to a 4-vertex
         quadrilateral if pentagons are not found in both images.
         """
         debug_paths = {}
-        src_contour = self._find_largest_contour(src)
-        ref_contour = self._find_largest_contour(ref)
+        src_contour = self._find_largest_contour(src_processed)
+        ref_contour = self._find_largest_contour(ref_processed)
         if src_contour is None or ref_contour is None:
             raise RuntimeError(
                 "Could not find a dominant contour in one or both images."
@@ -210,132 +176,240 @@ class AdvancedAligner:
         src_poly = cv2.approxPolyDP(src_contour, src_epsilon, True)
         ref_poly = cv2.approxPolyDP(ref_contour, ref_epsilon, True)
 
-        if self.debug_mode:
-            print(f"[DEBUG] Source polygon approximation has {len(src_poly)} vertices.")
-            print(
-                f"[DEBUG] Reference polygon approximation has {len(ref_poly)} vertices."
-            )
+        print(f"[INFO] Source polygon approximation has {len(src_poly)} vertices.")
+        print(f"[INFO] Reference polygon approximation has {len(ref_poly)} vertices.")
 
         # **CORE LOGIC: Prioritize Pentagon (5 points)**
         if len(src_poly) == 5 and len(ref_poly) == 5:
             print(
-                "[INFO] Pentagon detected for both images. Using pentagon-based alignment."
+                "[INFO] Pentagon detected in both images. Using pentagon-based alignment."
             )
-            # Use the general polygon sorter for the 5 points
             src_pts = self._order_polygon_points(src_poly)
             ref_pts = self._order_polygon_points(ref_poly)
             shape_used = "pentagon"
         else:
             # **FALLBACK: Use Quadrilateral (4 points) from minAreaRect**
-            if len(src_poly) != 5 or len(ref_poly) != 5:
-                print(
-                    "[INFO] Pentagon not found or vertex counts mismatch. Falling back to quadrilateral alignment."
-                )
-
+            print(
+                "[INFO] Pentagon not found or vertex counts mismatch. Falling back to quadrilateral alignment."
+            )
             src_rect = cv2.minAreaRect(src_contour)
             ref_rect = cv2.minAreaRect(ref_contour)
-            # Use the specialized quadrilateral sorter for the 4 points
             src_pts = self._order_points_quad(cv2.boxPoints(src_rect))
             ref_pts = self._order_points_quad(cv2.boxPoints(ref_rect))
             shape_used = "quadrilateral"
 
-        # --- DEBUGGING STEPS ---
-        if self.debug_mode and self.output_dir:
-            print(f"[DEBUG] Aligning with {shape_used} shape.")
-            src_debug, ref_debug = src.copy(), ref.copy()
-            # Draw contours and ordered vertices on debug images
-            cv2.polylines(src_debug, [src_pts.astype(np.int32)], True, (0, 255, 0), 2)
-            cv2.polylines(ref_debug, [ref_pts.astype(np.int32)], True, (0, 255, 0), 2)
-            for i, p in enumerate(src_pts):
-                cv2.putText(
-                    src_debug,
-                    str(i),
-                    tuple(p.astype(int)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (255, 0, 0),
-                    2,
-                )
-            for i, p in enumerate(ref_pts):
-                cv2.putText(
-                    ref_debug,
-                    str(i),
-                    tuple(p.astype(int)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (255, 0, 0),
-                    2,
-                )
+        # --- Generate Debug Images ---
+        src_debug, ref_debug = src_processed.copy(), ref_processed.copy()
+        cv2.polylines(src_debug, [src_pts.astype(np.int32)], True, (0, 255, 0), 2)
+        cv2.polylines(ref_debug, [ref_pts.astype(np.int32)], True, (0, 255, 0), 2)
+        for i, p in enumerate(src_pts):
+            cv2.putText(
+                src_debug,
+                str(i),
+                tuple(p.astype(int)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 0, 0),
+                2,
+            )
+        for i, p in enumerate(ref_pts):
+            cv2.putText(
+                ref_debug,
+                str(i),
+                tuple(p.astype(int)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 0, 0),
+                2,
+            )
 
-            debug_paths[f"geom_src_{shape_used}"] = os.path.join(
-                self.output_dir, f"debug_geom_src_{shape_used}.png"
-            )
-            debug_paths[f"geom_ref_{shape_used}"] = os.path.join(
-                self.output_dir, f"debug_geom_ref_{shape_used}.png"
-            )
-            save_image(debug_paths[f"geom_src_{shape_used}"], src_debug)
-            save_image(debug_paths[f"geom_ref_{shape_used}"], ref_debug)
-        # --- END DEBUGGING ---
+        self._save_debug_image(f"03_geom_src_{shape_used}", src_debug, debug_paths)
+        self._save_debug_image(f"03_geom_ref_{shape_used}", ref_debug, debug_paths)
+        # --- End Debugging ---
 
         M, _ = cv2.findHomography(src_pts, ref_pts, cv2.RANSAC, 5.0)
         if M is None:
             raise RuntimeError("Homography computation failed with geometric points.")
 
-        h, w = ref.shape[:2]
-        aligned_img = cv2.warpPerspective(src, M, (w, h))
-        return aligned_img, debug_paths
+        return M, debug_paths
 
-    def align_by_contour_centroid(self, src, ref):
-        """Aligns by matching the centroids of their largest contours."""
-        # (This method remains unchanged)
-        src_contour = self._find_largest_contour(src)
-        ref_contour = self._find_largest_contour(ref)
-        if src_contour is None or ref_contour is None:
-            raise RuntimeError("No valid contours found for centroid alignment")
+    # --- EXISTING METHODS (Unchanged) ---
+    def align_by_feature(self, src_processed, ref_processed, use_sift=False):
+        """Aligns images based on feature matching (ORB or SIFT)."""
+        debug_paths = {}
+        detector = self.sift if use_sift and self.sift else self.orb
+        if detector is None:
+            raise RuntimeError(
+                f"Feature detector {'SIFT' if use_sift else 'ORB'} not available."
+            )
+        gray_src = cv2.cvtColor(src_processed, cv2.COLOR_BGR2GRAY)
+        gray_ref = cv2.cvtColor(ref_processed, cv2.COLOR_BGR2GRAY)
+        kp1, des1 = detector.detectAndCompute(gray_src, None)
+        kp2, des2 = detector.detectAndCompute(gray_ref, None)
 
+        if des1 is None or des2 is None or len(des1) < 2 or len(des2) < 2:
+            return None, {}
+
+        norm = cv2.NORM_L2 if use_sift and self.sift else cv2.NORM_HAMMING
+        matcher = cv2.BFMatcher(norm, crossCheck=False)
+        matches = matcher.knnMatch(des1, des2, k=2)
+
+        good_matches = [m for m, n in matches if m.distance < 0.75 * n.distance]
+        img_matches = cv2.drawMatches(
+            src_processed, kp1, ref_processed, kp2, good_matches, None
+        )
+        self._save_debug_image("02_feature_matches", img_matches, debug_paths)
+
+        if len(good_matches) < 10:
+            return None, debug_paths
+
+        src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(
+            -1, 1, 2
+        )
+        dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(
+            -1, 1, 2
+        )
+        M, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+        return M, debug_paths
+
+    def align_by_contour_pose(self, src_processed, ref_processed):
+        """Aligns images by estimating the pose of their largest contours."""
+        debug_paths = {}
+        # This now uses the old _find_largest_contour logic. To make it use the new one, we would need to adapt it.
+        # For now, let's keep its original logic separate.
+        gray_src = (
+            cv2.cvtColor(src_processed, cv2.COLOR_BGR2GRAY)
+            if len(src_processed.shape) == 3
+            else src_processed.copy()
+        )
+        binary_src = cv2.adaptiveThreshold(
+            gray_src, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+        )
+        contours_src, _ = cv2.findContours(
+            binary_src, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        src_contour = max(
+            [c for c in contours_src if cv2.contourArea(c) > self.min_contour_area],
+            key=cv2.contourArea,
+        )
         M_src = cv2.moments(src_contour)
+        src_centroid = (
+            int(M_src["m10"] / M_src["m00"]),
+            int(M_src["m01"] / M_src["m00"]),
+        )
+
+        gray_ref = (
+            cv2.cvtColor(ref_processed, cv2.COLOR_BGR2GRAY)
+            if len(ref_processed.shape) == 3
+            else ref_processed.copy()
+        )
+        binary_ref = cv2.adaptiveThreshold(
+            gray_ref, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+        )
+        contours_ref, _ = cv2.findContours(
+            binary_ref, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        ref_contour = max(
+            [c for c in contours_ref if cv2.contourArea(c) > self.min_contour_area],
+            key=cv2.contourArea,
+        )
         M_ref = cv2.moments(ref_contour)
-        if M_src["m00"] == 0 or M_ref["m00"] == 0:
-            raise RuntimeError("Cannot compute centroid due to zero-area contour.")
-
-        cx_src, cy_src = int(M_src["m10"] / M_src["m00"]), int(
-            M_src["m01"] / M_src["m00"]
-        )
-        cx_ref, cy_ref = int(M_ref["m10"] / M_ref["m00"]), int(
-            M_ref["m01"] / M_ref["m00"]
+        ref_centroid = (
+            int(M_ref["m10"] / M_ref["m00"]),
+            int(M_ref["m01"] / M_ref["m00"]),
         )
 
-        dx, dy = cx_ref - cx_src, cy_ref - cy_src
-        M = np.float32([[1, 0, dx], [0, 1, dy]])
-        aligned = cv2.warpAffine(src, M, (ref.shape[1], ref.shape[0]))
-        return aligned, {}
+        src_rect = cv2.minAreaRect(src_contour)
+        ref_rect = cv2.minAreaRect(ref_contour)
+        src_angle = src_rect[2] + (90 if src_rect[1][0] < src_rect[1][1] else 0)
+        ref_angle = ref_rect[2] + (90 if ref_rect[1][0] < ref_rect[1][1] else 0)
+        angle_diff = ref_angle - src_angle
+        src_area = max(1, src_rect[1][0] * src_rect[1][1])
+        ref_area = ref_rect[1][0] * ref_rect[1][1]
+        scale = math.sqrt(ref_area / src_area)
 
-    def align(self, src, ref, method=None):
+        M = cv2.getRotationMatrix2D(src_centroid, angle_diff, scale)
+        rotated_src_centroid = M @ np.array([src_centroid[0], src_centroid[1], 1])
+        M[0, 2] += ref_centroid[0] - rotated_src_centroid[0]
+        M[1, 2] += ref_centroid[1] - rotated_src_centroid[1]
+
+        return M, debug_paths
+
+    # --- MAIN ALIGNMENT DISPATCHER (Updated) ---
+    def align(self, src, ref, method=None, shadow_removal=None):
         """
         Main alignment interface that dispatches to different alignment methods.
         """
         method = method or self.default_align_method
-        aligned_image, debug_paths = None, {}
+        shadow_method = shadow_removal or self.shadow_removal_method
+        debug_paths = {}
+
+        self._save_debug_image("00_input_source", src, debug_paths)
+        self._save_debug_image("00_input_reference", ref, debug_paths)
 
         try:
-            if method == "geometric_shape":
-                aligned_image, debug_paths = self.align_by_geometric_shape(src, ref)
-            elif method in ["feature_orb", "feature_sift"]:
-                aligned_image, debug_paths = self.align_by_feature(
-                    src, ref, use_sift=(method == "feature_sift")
+            src_processed, ref_processed = src.copy(), ref.copy()
+            if shadow_method == "clahe":
+                src_processed = self._apply_clahe_contrast(src_processed)
+                ref_processed = self._apply_clahe_contrast(ref_processed)
+                self._save_debug_image(
+                    "01_src_clahe_enhanced", src_processed, debug_paths
                 )
-            elif method == "contour_centroid":
-                aligned_image, debug_paths = self.align_by_contour_centroid(src, ref)
+                self._save_debug_image(
+                    "01_ref_clahe_enhanced", ref_processed, debug_paths
+                )
+            elif shadow_method == "gamma":
+                src_processed = self._apply_simple_gamma(src_processed)
+                ref_processed = self._apply_simple_gamma(ref_processed)
+                self._save_debug_image(
+                    "01_src_gamma_corrected", src_processed, debug_paths
+                )
+                self._save_debug_image(
+                    "01_ref_gamma_corrected", ref_processed, debug_paths
+                )
+            elif shadow_method not in ["none", None]:
+                print(
+                    f"[Warning] Unknown shadow removal method '{shadow_method}'. Skipping."
+                )
+
+            M, dbg = None, {}
+            print(f"[INFO] Attempting alignment with method: '{method}'")
+
+            # --- Updated Method Dispatcher ---
+            if method == "geometric_shape":
+                M, dbg = self.align_by_geometric_shape(src_processed, ref_processed)
+            elif method == "contour_pose":
+                M, dbg = self.align_by_contour_pose(src_processed, ref_processed)
+            elif method == "feature_sift":
+                M, dbg = self.align_by_feature(
+                    src_processed, ref_processed, use_sift=True
+                )
+            elif method == "feature_orb":
+                M, dbg = self.align_by_feature(
+                    src_processed, ref_processed, use_sift=False
+                )
             else:
                 raise ValueError(f"Unknown alignment method: {method}")
+
+            debug_paths.update(dbg)
+
         except Exception as e:
             print(f"[Alignment Error] Method '{method}' failed: {e}")
-            return {"image": None, "debug_paths": debug_paths}
+            return {"image": None, "debug_paths": debug_paths, "transform_matrix": None}
 
-        if aligned_image is not None and self.output_dir:
-            final_path = os.path.join(self.output_dir, f"final_aligned_{method}.png")
-            save_image(final_path, aligned_image)
-            debug_paths["final_aligned_image"] = final_path
+        if M is None:
+            print(
+                f"[Alignment Warning] Method '{method}' could not compute a transformation matrix."
+            )
+            return {"image": None, "debug_paths": debug_paths, "transform_matrix": None}
 
-        return {"image": aligned_image, "debug_paths": debug_paths}
->>>>>>> Stashed changes
+        h, w = ref.shape[:2]
+        warp_func = cv2.warpAffine if M.shape[0] == 2 else cv2.warpPerspective
+        aligned_image = warp_func(src, M, (w, h))
+        self._save_debug_image(f"04_final_aligned_{method}", aligned_image, debug_paths)
+
+        return {
+            "image": aligned_image,
+            "debug_paths": debug_paths,
+            "transform_matrix": M,
+        }

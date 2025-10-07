@@ -1,15 +1,10 @@
-<<<<<<< Updated upstream
-version https://git-lfs.github.com/spec/v1
-oid sha256:f495c4a57cddfd7785e840a61dfa24c68beb7c7d4a0344006bbce92409fd522c
-size 8224
-=======
 # Visual Analyzer - Advanced Usage Guide
 
 This document provides a detailed guide for advanced users of the Visual Analyzer, covering in-depth explanations of command-line arguments, debug reports, and the symmetry analysis feature.
 
 ## Dependencies
 
-In addition to the libraries listed in `requirements.txt`, this tool uses `reportlab` and `weasyprint` for generating PDF reports from different sources.
+In addition to the libraries listed in `requirements.txt`, this tool uses `reportlab` for generating PDF reports.
 
 ## Command-Line Arguments
 
@@ -25,8 +20,12 @@ The `main.py` script provides a variety of command-line arguments to customize t
 
 ### Pipeline Step Arguments
 
-*   `--color-alignment`: Enable color correction. This requires `reference_color_checker_path` and at least one path in `colorchecker_reference_for_project` to be set in the project config.
-*   `--alignment`: Enable geometrical alignment. This feature uses ArUco markers to correct perspective distortion.
+### Color Correction Arguments
+
+*   `--color-alignment`: Enable color correction. Requires paths to be set in the `color_correction` object in the project config.
+*   `--color-correction-method <method>`: Specify the algorithm for color correction. Choices: `linear`, `polynomial`, `hsv`, `histogram`. Default is `linear`.
+*   `--sample-color-checker <path>`: Path to a color checker image taken with the sample. If provided, it is used for on-the-fly color correction for this specific run, overriding the project's default matrix.
+*   `--alignment`: Enable geometrical alignment. This feature, handled by the `geometric_alignment` module, uses ArUco markers to correct perspective distortion.
 *   `--object-alignment`: Enable object alignment. This second alignment step aligns the object to a template image. The default method uses a robust geometric shape fitting (pentagon/quadrilateral). Requires `object_reference_path` to be set.
 *   `--apply-mask`: Enable background removal using one or more technical drawing layers.
 *   `--blur`: Enable blurring of the input image before color matching. This can help to reduce noise and smooth out color variations.
@@ -49,54 +48,45 @@ The `main.py` script provides a variety of command-line arguments to customize t
 ### Other Optional Arguments
 
 *   `--blur-kernel <W H>`: (Optional) Specify a custom kernel size (width height) for blurring. Both values must be odd integers. Overrides the default adaptive kernel.
-*   `--report-type <type>`: Specify the type of PDF report to generate. Options are `html` (for the WeasyPrint-based PDF), `reportlab`, or `all` (default) to generate both.
+
 *   `--save-state-to <path>`: Path to save the entire pipeline state to a `.gri` file. This allows for later report regeneration.
 *   `--load-state-from <path>`: Path to load a previously saved pipeline state from a `.gri` file and re-run the pipeline from that point.
 
 ## GUI Usage
 
-To launch the Graphical User Interface (GUI), run `streamlit_app.py`:
+To launch the Graphical User Interface (GUI), run `src/gui.py`:
 
 ```bash
-streamlit run streamlit_app.py
+python src/gui.py
 ```
 
-The GUI provides an intuitive way to configure and run the analysis. Here's a breakdown of its elements:
+The GUI provides a tabbed interface to access all of the application's features:
 
-*   **Project Section:**
-    *   **Project Name:** Select your project from the dropdown list. This corresponds to the `--project` CLI argument.
+### Run Analysis Tab
 
-*   **Files Section:**
-    *   **Select Image:** Click this button to browse and select the image file you want to analyze. This corresponds to the `--image` CLI argument.
+This is the main tab for running an analysis pipeline.
 
-*   **Analysis Steps & Options Section:** This section contains checkboxes for enabling/disabling various analysis steps, ordered by their typical execution flow in the pipeline. Some steps also have associated input fields for specific parameters.
-    *   **Color Alignment:** Enables color correction (`--color-alignment`).
-    *   **Geometrical Alignment (ArUco):** Enables ArUco-based alignment (`--alignment`).
-    *   **Object Alignment:** Enables object alignment (`--object-alignment`).
-    *   **Apply Mask:** Enables background removal (`--apply-mask`).
-        *   **Treat White as BG:** Modifier for `--apply-mask` (`--mask-bg-is-white`).
-        *   **Masking Order (e.g., 1-2-3):** Specifies the order of technical drawing layers to apply (`--masking-order`).
-    *   **Blur Image:** Enables image blurring (`--blur`).
-        *   **Blur Kernel (W H, odd):** Custom kernel size for blurring (`--blur-kernel`).
-    *   **Aggregate Matched Pixels:** Enables aggregation of color regions (`--aggregate`).
-        *   **Agg Kernel Size:** Kernel size for aggregation dilation (`--agg-kernel-size`).
-        *   **Agg Min Area:** Minimum area ratio for aggregated components (`--agg-min-area`).
-        *   **Agg Density Thresh:** Minimum density for aggregated areas (`--agg-density-thresh`).
-    *   **Symmetry Analysis:** Enables symmetry calculation (`--symmetry`).
+*   **Project:** Select the project and the image to analyze.
+*   **Analysis Steps & Options:** A comprehensive set of checkboxes and input fields to control every step of the pipeline, corresponding to the available CLI arguments (e.g., enabling color correction, choosing the algorithm, setting blur kernels, etc.). This section is visible when running the GUI in debug mode (`python src/gui.py --debug`).
+*   **Run Analysis:** Executes the pipeline with the selected configuration.
 
-*   **Report Section:**
-    *   **Report Type:** Select the desired report format from the dropdown. This corresponds to the `--report-type` CLI argument.
+### Create Project Tab
 
-*   **Run Analysis Button:** Click this button to start the analysis. A dialog will prompt you to choose between running in **Debug Mode** (`--debug`) or **Normal Mode**. The GUI will execute the underlying CLI command and display a success or error message.
+Provides a simple interface to scaffold a new project. Enter a project name and click "Create". The new project will be created with the default folder structure and configuration files.
+
+### Manage Dataset Tab
+
+This tab contains tools for managing your project's data assets.
+
+*   **Launch Point Selector:** Opens a dedicated window to interactively select points on your training images. These points are used to define the color range for analysis and are saved to `dataset_item_processing_config.json`.
+*   **Setup Project Files:** Opens the "File Placer" utility. This tool reads your `project_config.json`, shows the status (Found/Missing) of all required reference files, and provides a simple interface to select local files and have them automatically copied and renamed to their correct locations within the project.
 
 ## Report Outputs and Archiving
 
 For each analysis run, the tool generates several output files in the `output/<project_name>/<sample_name>/` directory:
 
-1.  **HTML Report:** A detailed, interactive report (`<sample_name>.html`).
-2.  **Primary PDF Report:** A PDF version of the report generated with WeasyPrint (`<sample_name>.pdf`).
-3.  **Alternative PDF Report:** An alternative PDF version generated with ReportLab (`<sample_name>_reportlab.pdf`).
-4.  **State Archive:** A `.gri` (Gemini Report Information) file containing the entire pipeline state, created using Python's `pickle` module. These are stored in the `archives/` subdirectory.
+1.  **PDF Report:** A detailed PDF report generated with ReportLab (`<sample_name>_reportlab.pdf`).
+2.  **State Archive:** A `.gri` (Gemini Report Information) file containing the entire pipeline state, created using Python's `pickle` module. These are stored in the `archives/` subdirectory.
 
 *Note: The specific reports generated depends on the `--report-type` argument and whether the required libraries are installed.*
 
@@ -123,4 +113,3 @@ When you run the analysis with the `--debug` flag, the Visual Analyzer generates
 *   **Image Pipeline:** A visual representation of the image processing pipeline, showing the intermediate images at each step of the analysis. This is crucial for debugging the new alignment and masking steps.
 *   **Symmetry Analysis Results:** The results of the symmetry analysis, including the symmetry scores for each type of symmetry and visualizations of the symmetry axes.
 *   **Dataset Color Space Definition:** A detailed breakdown of how the color space was derived from the training images, including a scatter plot showing the distribution of training colors.
->>>>>>> Stashed changes

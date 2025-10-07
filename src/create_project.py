@@ -75,38 +75,47 @@ def create_project(project_name: str):
         return [f"Error: Project '{project_name}' already exists at {project_path}"]
 
     try:
-        # Create directories
         dirs_to_create = [
-            project_path / "dataset" / "colorchecker",
-            project_path / "dataset" / "aruco",
-            project_path / "dataset" / "training",
-            project_path / "dataset" / "drawing",
-            project_path / "dataset" / "object",
-            project_path / "samples" / "test" / "colorchecker",
-            project_path / "samples" / "test" / "sample",
+            project_path / "dataset" / "training_images",
+            project_path / "dataset" / "drawing_layers",
+            project_path / "samples",
         ]
         for d in dirs_to_create:
             d.mkdir(parents=True, exist_ok=True)
             messages.append(f"Created directory: {d}")
 
+        # Create a README in the samples directory
+        readme_path = project_path / "samples" / "README.md"
+        with open(readme_path, 'w') as f:
+            f.write("# Samples Directory\n\nPlace the images you want to analyze in this directory.")
+        messages.append(f"Created README: {readme_path}")
+
         # Generate default ArUco reference
         aruco_ref_filename = "default_aruco_reference.png"
-        aruco_path = project_path / "dataset" / "aruco"
+        aruco_path = project_path / "dataset"
         messages.append(generate_aruco_reference(aruco_path / aruco_ref_filename))
 
         # Create project_config.json
         project_config_path = project_path / "project_config.json"
         default_project_config = {
-            "reference_color_checker_path": "dataset/colorchecker/colorchecker.png",
-            "training_path": "dataset/training",
-            "colorchecker_reference_for_project": [],
-            "object_reference_path": None,
-            "technical_drawing_path_layer_1": None,
-            "technical_drawing_path_layer_2": None,
-            "technical_drawing_path_layer_3": None,
-            "aruco_reference_path": f"dataset/aruco/{aruco_ref_filename}",
-            "aruco_marker_map": {},
-            "aruco_output_size": [1000, 1000]
+            "training_path": "dataset/training_images",
+            "object_reference_path": "dataset/object_reference.png",
+            "color_correction": {
+                "reference_color_checker_path": "dataset/reference_color_checker.png",
+                "project_specific_color_checker_path": "dataset/project_color_checker.png"
+            },
+            "geometrical_alignment": {
+                "reference_path": f"dataset/{aruco_ref_filename}",
+                "marker_map": {},
+                "output_size": [1000, 1000]
+            },
+            "masking": {
+                "drawing_layers": {
+                    "1": "dataset/drawing_layers/layer1.png",
+                    "2": "dataset/drawing_layers/layer2.png",
+                    "3": "dataset/drawing_layers/layer3.png"
+                }
+            }
         }
         with open(project_config_path, 'w') as f:
             json.dump(default_project_config, f, indent=4)

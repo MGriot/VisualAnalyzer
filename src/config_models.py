@@ -44,31 +44,30 @@ class DatasetItemProcessingConfig(BaseModel):
     """
     image_configs: List[ImageConfig]
 
+class ColorCorrectionConfig(BaseModel):
+    """Configuration for color correction."""
+    reference_color_checker_path: str
+    project_specific_color_checker_path: Optional[str] = None
+
+class GeometricalAlignmentConfig(BaseModel):
+    """Configuration for ArUco-based geometrical alignment."""
+    reference_path: Optional[str] = None
+    marker_map: Optional[Dict[str, List[List[int]]]] = Field(default_factory=dict)
+    output_size: Optional[List[int]] = Field(default_factory=lambda: [1000, 1000])
+
+class MaskingConfig(BaseModel):
+    """Configuration for masking."""
+    drawing_layers: Dict[str, str] = Field(default_factory=dict)
+
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     """
     Defines the overall configuration for a Visual Analyzer project.
-
-    Attributes:
-        reference_color_checker_path (str): Path to the ideal color checker image.
-        training_path: str
-        colorchecker_reference_for_project: Optional[List[str]] = None
-        object_reference_path: Optional[str] = None
-        technical_drawing_path_layer_1: Optional[str] = None
-        technical_drawing_path_layer_2: Optional[str] = None
-        technical_drawing_path_layer_3: Optional[str] = None
-        aruco_reference_path: Optional[str] = None
-        aruco_marker_map: Optional[Dict[str, List[List[int]]]] = Field(default_factory=dict)
-        aruco_output_size: Optional[List[int]] = Field(default_factory=lambda: [1000, 1000])
     """
-    reference_color_checker_path: str
     training_path: str
-    colorchecker_reference_for_project: Optional[List[str]] = None
     object_reference_path: Optional[str] = None
-    technical_drawing_path_layer_1: Optional[str] = None
-    technical_drawing_path_layer_2: Optional[str] = None
-    technical_drawing_path_layer_3: Optional[str] = None
-    aruco_reference_path: Optional[str] = None
-    aruco_marker_map: Optional[Dict[str, List[List[int]]]] = Field(default_factory=dict)
-    aruco_output_size: Optional[List[int]] = Field(default_factory=lambda: [1000, 1000])
+    
+    color_correction: ColorCorrectionConfig
+    geometrical_alignment: GeometricalAlignmentConfig = Field(default_factory=GeometricalAlignmentConfig)
+    masking: MaskingConfig = Field(default_factory=MaskingConfig)
