@@ -1,6 +1,6 @@
 # Theory: Image Alignment
 
-The Visual Analyzer employs a sophisticated two-stage alignment process to ensure that the object of interest is correctly oriented and scaled before analysis. This process corrects for both camera perspective and object position.
+The Visual Analyzer employs a sophisticated two-stage alignment process to ensure that the object of interest is correctly oriented and scaled before analysis. This process corrects for both camera perspective and object position, utilizing distinct methodologies for each stage.
 
 ## Stage 1: Geometrical Alignment
 

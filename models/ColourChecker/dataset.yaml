@@ -1,0 +1,6 @@
+train: C:\Users\Admin\Documents\Coding\VisualAnalyzer\models\ColourChecker\train
+val: C:\Users\Admin\Documents\Coding\VisualAnalyzer\models\ColourChecker\val
+
+nc: 1
+
+names: ["ColourChecker"]

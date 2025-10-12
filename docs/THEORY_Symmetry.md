@@ -1,6 +1,6 @@
 # Theory: Symmetry Analysis
 
-Symmetry is a fundamental concept in geometry and art, describing an object's invariance under certain transformations. The Visual Analyzer quantifies the symmetry of an object's 2D binary mask by testing its resilience to the four fundamental **isometries** (rigid transformations) of the Euclidean plane.
+Symmetry is a fundamental concept in geometry and art, describing an object's invariance under certain transformations. The Visual Analyzer quantifies the symmetry of an object's 2D binary mask by testing its resilience to the four fundamental **isometries** (rigid transformations) of the Euclidean plane, providing a comprehensive analysis of its structural regularity.
 
 -   **Theory (Group Theory & Isometries):** In mathematics, the set of transformations that leave an object unchanged forms a **symmetry group**. This analysis checks for invariance under discrete versions of these transformations. The analysis is performed on a binary mask of the object, and the symmetry "score" is a normalized similarity metric (typically `1 - L1 Norm`), where a score of 1.0 indicates perfect symmetry under that transformation.
 

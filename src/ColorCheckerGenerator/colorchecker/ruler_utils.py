@@ -8,6 +8,7 @@ import numpy as np
 import cv2
 from typing import Literal
 from .config import DEFAULT_DPI
+from .drawing_utils import put_text_cv2
 
 def generate_ruler_dual(length_px: int, dpi: int = DEFAULT_DPI, thickness: int = 100, mode: Literal["cm","inch","both"]="both"):
     """
@@ -17,7 +18,6 @@ def generate_ruler_dual(length_px: int, dpi: int = DEFAULT_DPI, thickness: int =
     # Start with white canvas
     ruler = np.ones((thickness, length_px, 3), dtype=np.uint8) * 255
     color = (0,0,0)
-    font = cv2.FONT_HERSHEY_SIMPLEX
 
     if mode in ("both", "cm"):
         # cm parameters
@@ -28,10 +28,10 @@ def generate_ruler_dual(length_px: int, dpi: int = DEFAULT_DPI, thickness: int =
         for cm in range(0, int((length_px / px_per_cm)) + 1):
             x = int(round(cm * px_per_cm))
             tick = int(top_h * 0.6) if cm % 5 == 0 else int(top_h * 0.35)
-            cv2.line(ruler, (x, 0), (x, tick), color, 1)
+            cv2.line(ruler, (x, 0), (x, tick), color, 2) # Increased thickness to 2
             if cm % 5 == 0:
-                cv2.putText(ruler, f"{cm}", (x+2, tick+12), font, 0.4, color, 1, cv2.LINE_AA)
-        cv2.putText(ruler, "cm", (5, 14), font, 0.5, color, 1, cv2.LINE_AA)
+                ruler = put_text_cv2(ruler, f"{cm}", (x+2, tick+12), font_size=16, color=color)
+        ruler = put_text_cv2(ruler, "cm", (5, 14), font_size=20, color=color)
 
     if mode in ("both", "inch"):
         # inch parameters
@@ -43,10 +43,10 @@ def generate_ruler_dual(length_px: int, dpi: int = DEFAULT_DPI, thickness: int =
             x = int(round(i_sub * (px_per_in / subdivisions)))
             tick = int(bottom_h * 0.6) if (i_sub % subdivisions == 0) else int(bottom_h * 0.35)
             y0 = thickness - 1 - tick
-            cv2.line(ruler, (x, y0), (x, thickness-1), color, 1)
+            cv2.line(ruler, (x, y0), (x, thickness-1), color, 2) # Increased thickness to 2
             if i_sub % subdivisions == 0:
                 inches = i_sub // subdivisions
-                cv2.putText(ruler, f"{inches}", (x+2, thickness - 10), font, 0.4, color, 1, cv2.LINE_AA)
-        cv2.putText(ruler, "in", (5, thickness - 20), font, 0.5, color, 1, cv2.LINE_AA)
+                ruler = put_text_cv2(ruler, f"{inches}", (x+2, thickness - 10), font_size=16, color=color)
+        ruler = put_text_cv2(ruler, "in", (5, thickness - 20), font_size=20, color=color)
 
     return ruler

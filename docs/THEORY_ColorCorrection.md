@@ -1,6 +1,6 @@
 # Theory: Color Correction
 
-The color correction module is one of the most critical components of the Visual Analyzer. Its goal is to standardize colors in a photograph by comparing a color checker in the image (the *source*) to an ideal, digitally-perfect version (the *reference*). This process involves two major phases: **Patch Detection** and **Patch Matching**.
+The color correction module is one of the most critical components of the Visual Analyzer. Its goal is to standardize colors in a photograph by comparing a color checker in the image (the *source*) to an ideal, digitally-perfect version (the *reference*). This process involves two major phases: **Patch Detection**, which employs a robust, multi-tiered approach to locate color patches, and **Patch Matching**, which intelligently aligns detected patches to their reference counterparts.
 
 ## Phase 1: Patch Detection
 
