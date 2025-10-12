@@ -1,13 +1,23 @@
-# Ignore .env files
-.env
+# Byte-compiled / optimized files
+__pycache__/
+*.pyc
 
-# Ignore .zip files
-*.zip
+# Test & cache files
+.pytest_cache/
+.mypy_cache/
+test_output/
 
-# Ignore data and output directories
+# Project-specific output
 data/
 output/
 
-# Ignore virtual environment
+# Environment
 .venv/
-src/__pycache__/
+.env
+
+# Other
+*.zip
+
+# Backup files and directories
+* - Copy/
+* - Copy (*).py

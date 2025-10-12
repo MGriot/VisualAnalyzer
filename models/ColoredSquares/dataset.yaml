@@ -1,6 +1,0 @@
-train: C:\Users\Admin\Documents\Coding\VisualAnalyzer\models\ColoredSquares\train
-val: C:\Users\Admin\Documents\Coding\VisualAnalyzer\models\ColoredSquares\val
-
-nc: 1
-
-names: ["ColoredSquares"]

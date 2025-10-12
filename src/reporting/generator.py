@@ -251,22 +251,43 @@ class ReportGenerator:
         step_dir = self.get_step_output_dir("reporting")
         fig, ax = plt.subplots(figsize=(12, 8))
 
+        all_h_vals = []
+        all_s_vals = []
+        all_colors = []
+
         for item in dataset_debug_info:
             hsv_colors = item.get('hsv_colors', [])
             if not hsv_colors: continue
 
-            h_vals, s_vals = [c[0] for c in hsv_colors], [c[1] for c in hsv_colors]
-            avg_hsv = np.uint8([[[np.mean(h_vals), np.mean(s_vals), np.mean([c[2] for c in hsv_colors])]]])
+            h_vals = [c[0] for c in hsv_colors]
+            s_vals = [c[1] for c in hsv_colors]
+            v_vals = [c[2] for c in hsv_colors]
+            
+            # Use the average color of the points from this specific image for the scatter plot color
+            avg_hsv = np.uint8([[[np.mean(h_vals), np.mean(s_vals), np.mean(v_vals)]]])
             avg_rgb = cv.cvtColor(avg_hsv, cv.COLOR_HSV2RGB)[0][0] / 255.0
 
-            ax.scatter(h_vals, s_vals, color=avg_rgb, label=os.path.basename(item['path']), s=50, alpha=0.8, edgecolors='black')
+            all_h_vals.extend(h_vals)
+            all_s_vals.extend(s_vals)
+            all_colors.extend([avg_rgb] * len(h_vals))
 
-        rect_width, rect_height = int(upper_hsv[0]) - int(lower_hsv[0]), int(upper_hsv[1]) - int(lower_hsv[1])
-        selection_rect = Rectangle((lower_hsv[0], lower_hsv[1]), rect_width, rect_height, linewidth=2, edgecolor='r', facecolor='none', label='Calculated Range')
-        ax.add_patch(selection_rect)
+        # --- START SAMPLING LOGIC ---
+        num_points = len(all_h_vals)
+        if num_points > 20000:
+            indices = np.random.choice(num_points, 20000, replace=False)
+            h_sample = np.array(all_h_vals)[indices]
+            s_sample = np.array(all_s_vals)[indices]
+            color_sample = np.array(all_colors)[indices]
+        else:
+            h_sample, s_sample, color_sample = all_h_vals, all_s_vals, all_colors
+        # --- END SAMPLING LOGIC ---
 
-        ax.set(xlabel='Hue (0-179)', ylabel='Saturation (0-255)', title='Training Data Color Space Definition', xlim=(0, 180), ylim=(0, 256))
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+        ax.scatter(h_sample, s_sample, c=color_sample, s=50, alpha=0.8, edgecolors='black')
+
+        # Create a legend with unique colors
+        unique_colors = {tuple(c): os.path.basename(item['path']) for item in dataset_debug_info for c in all_colors}
+        legend_elements = [plt.Line2D([0], [0], marker='o', color='w', label=label, markerfacecolor=color, markersize=10) for color, label in unique_colors.items()]
+        ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
         ax.grid(True, linestyle='--', alpha=0.6)
         fig.tight_layout(rect=[0, 0, 0.85, 1])
 
@@ -293,10 +314,6 @@ class ReportGenerator:
         step_dir = self.get_step_output_dir("reporting")
         processed_items = []
         for i, item in enumerate(dataset_debug_info):
-            print(f"--- Debugging item in _process_dataset_debug_info ---")
-            print(f"Item type: {type(item)}")
-            print(f"Item content: {item}")
-            print(f"-----------------------------------------------------")
             processed_item = item.copy()
             img = cv.imread(item['path'])
             if img is None: continue

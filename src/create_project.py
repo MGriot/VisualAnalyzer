@@ -1,11 +1,3 @@
-"""
-This module provides functionality to create and initialize new project directories
-for the Visual Analyzer application.
-
-It sets up the required folder structure, generates default configuration files,
-and creates a default ArUco reference image.
-"""
-
 import argparse
 import json
 from pathlib import Path
@@ -18,21 +10,11 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
 
 from src import config
+from src.ColorCheckerGenerator.colorchecker.generator import ColorCheckerGenerator
 
 def generate_aruco_reference(output_path: Path):
     """
     Generates a default A4 landscape ArUco reference image with 4 markers at the corners.
-
-    The generated image contains four ArUco markers (IDs 0, 1, 2, 3) placed at
-    the corners of an A4 landscape-sized white canvas. This image can be printed
-    and used as a reference for geometrical alignment.
-
-    Args:
-        output_path (Path): The full path, including filename and extension,
-                            where the generated ArUco reference image will be saved.
-
-    Returns:
-        str: A message indicating the successful generation and the path of the image.
     """
     width_px, height_px = 3508, 2480
     margin_px, marker_size_px = 150, 300
@@ -53,21 +35,24 @@ def generate_aruco_reference(output_path: Path):
     cv2.imwrite(str(output_path), image)
     return f"Generated ArUco reference image: {output_path}"
 
+def generate_colorchecker_with_aruco(output_path: Path):
+    """
+    Generates a standard ColorChecker with ArUco markers.
+    """
+    gen = ColorCheckerGenerator(
+        size="20cm",
+        dpi=300,
+        checker_type="classic",
+        include_aruco=True,
+        logo_text="Reference"
+    )
+    gen.build()
+    gen.save(str(output_path))
+    return f"Generated ColorChecker with ArUco markers: {output_path}"
+
 def create_project(project_name: str):
     """
     Creates a new project directory with a predefined structure and default configuration files.
-
-    The project directory will be created under `data/projects/`.
-    It includes subdirectories for `dataset` (colorchecker, aruco, training, drawing, object)
-    and `samples`, along with `project_config.json` and `dataset_item_processing_config.json`.
-    A default ArUco reference image is also generated.
-
-    Args:
-        project_name (str): The name of the new project to be created.
-
-    Returns:
-        List[str]: A list of status messages indicating the success or failure of each step.
-                   If the project already exists, an error message is returned.
     """
     messages = []
     project_path = config.PROJECTS_DIR / project_name
@@ -75,33 +60,33 @@ def create_project(project_name: str):
         return [f"Error: Project '{project_name}' already exists at {project_path}"]
 
     try:
+        dataset_path = project_path / "dataset"
         dirs_to_create = [
-            project_path / "dataset" / "training_images",
-            project_path / "dataset" / "drawing_layers",
+            dataset_path / "training_images",
+            dataset_path / "drawing_layers",
             project_path / "samples",
         ]
         for d in dirs_to_create:
             d.mkdir(parents=True, exist_ok=True)
             messages.append(f"Created directory: {d}")
 
-        # Create a README in the samples directory
         readme_path = project_path / "samples" / "README.md"
         with open(readme_path, 'w') as f:
             f.write("# Samples Directory\n\nPlace the images you want to analyze in this directory.")
         messages.append(f"Created README: {readme_path}")
 
-        # Generate default ArUco reference
-        aruco_ref_filename = "default_aruco_reference.png"
-        aruco_path = project_path / "dataset"
-        messages.append(generate_aruco_reference(aruco_path / aruco_ref_filename))
+        aruco_ref_filename = "default_geometric_align_reference.png"
+        messages.append(generate_aruco_reference(dataset_path / aruco_ref_filename))
 
-        # Create project_config.json
+        cc_aruco_filename = "default_color_checker_reference.png"
+        messages.append(generate_colorchecker_with_aruco(dataset_path / cc_aruco_filename))
+
         project_config_path = project_path / "project_config.json"
         default_project_config = {
             "training_path": "dataset/training_images",
             "object_reference_path": "dataset/object_reference.png",
             "color_correction": {
-                "reference_color_checker_path": "dataset/reference_color_checker.png",
+                "reference_color_checker_path": f"dataset/{cc_aruco_filename}",
                 "project_specific_color_checker_path": "dataset/project_color_checker.png"
             },
             "geometrical_alignment": {
@@ -121,7 +106,6 @@ def create_project(project_name: str):
             json.dump(default_project_config, f, indent=4)
         messages.append(f"Created config file: {project_config_path}")
 
-        # Create dataset_item_processing_config.json
         dataset_config_path = project_path / "dataset_item_processing_config.json"
         default_dataset_config = {"image_configs": []}
         with open(dataset_config_path, 'w') as f:
@@ -129,7 +113,7 @@ def create_project(project_name: str):
         messages.append(f"Created config file: {dataset_config_path}")
 
         messages.append(f"\nProject '{project_name}' created successfully.")
-        messages.append("Please add your reference color checker image to the 'dataset/colorchecker' directory.")
+        messages.append("Reference files for alignment and color correction have been automatically generated in the 'dataset' folder.")
 
     except Exception as e:
         messages.append(f"An error occurred during project creation: {e}")

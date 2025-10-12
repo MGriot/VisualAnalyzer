@@ -4,7 +4,11 @@ This document provides a detailed guide for advanced users of the Visual Analyze
 
 ## Dependencies
 
-In addition to the libraries listed in `requirements.txt`, this tool uses `reportlab` for generating PDF reports.
+In addition to the libraries listed in `requirements.txt` (which include `numpy`, `opencv-python`, `ultralytics`, etc.), the tool relies on:
+
+*   `scipy` and `scikit-image`: For robust color patch matching using the Hungarian algorithm and CIELAB color difference calculations.
+*   `reportlab`: For generating PDF reports.
+*   `colour-science`: For accessing standardized color data for reference generation.
 
 ## Command-Line Arguments
 
@@ -20,13 +24,14 @@ The `main.py` script provides a variety of command-line arguments to customize t
 
 ### Pipeline Step Arguments
 
-### Color Correction Arguments
-
-*   `--color-alignment`: Enable color correction. Requires paths to be set in the `color_correction` object in the project config.
+*   `--color-alignment`: Enable color correction. This is a two-stage process:
+    1.  **Patch Detection**: The system uses a tiered approach to find color checker patches: **ArUco Alignment** -> **Robust OpenCV (Hough)** -> **YOLOv8** -> **Simple Grid**.
+    2.  **Robust Patch Matching**: After detection, it uses the Hungarian algorithm to intelligently match detected patches to their correct reference swatches based on color similarity (CIELAB ΔE*). This makes the process resilient to incorrectly ordered, missing, or falsely detected patches.
 *   `--color-correction-method <method>`: Specify the algorithm for color correction. Choices: `linear`, `polynomial`, `hsv`, `histogram`. Default is `linear`.
 *   `--sample-color-checker <path>`: Path to a color checker image taken with the sample. If provided, it is used for on-the-fly color correction for this specific run, overriding the project's default matrix.
 *   `--alignment`: Enable geometrical alignment. This feature, handled by the `geometric_alignment` module, uses ArUco markers to correct perspective distortion.
-*   `--object-alignment`: Enable object alignment. This second alignment step aligns the object to a template image. The default method uses a robust geometric shape fitting (pentagon/quadrilateral). Requires `object_reference_path` to be set.
+*   `--object-alignment`: Enable object alignment. This second alignment step aligns the object to a template image. The default method (`geometric_shape`) finds the main contour of the object in the source and reference images. It then attempts to fit a 5-sided polygon (a pentagon) to both. If successful, the 5 vertices are used to compute a highly accurate homography. If a pentagon cannot be resolved, it falls back to using the 4 corners of the minimum area bounding box. This geometric approach is robust to changes in scale and rotation. Requires `object_reference_path` to be set.
+*   `--object-alignment-shadow-removal <method>`: Pre-processes the image to remove shadows before object alignment, which can significantly improve contour detection. Choices are `clahe` (default, advanced contrast enhancement), `gamma` (simple brightness lift), and `none`.
 *   `--apply-mask`: Enable background removal using one or more technical drawing layers.
 *   `--blur`: Enable blurring of the input image before color matching. This can help to reduce noise and smooth out color variations.
 *   `--symmetry`: Enable symmetry analysis. This will analyze the symmetry of the object in the image and include the results in the debug report.
@@ -79,7 +84,7 @@ Provides a simple interface to scaffold a new project. Enter a project name and 
 This tab contains tools for managing your project's data assets.
 
 *   **Launch Point Selector:** Opens a dedicated window to interactively select points on your training images. These points are used to define the color range for analysis and are saved to `dataset_item_processing_config.json`.
-*   **Setup Project Files:** Opens the "File Placer" utility. This tool reads your `project_config.json`, shows the status (Found/Missing) of all required reference files, and provides a simple interface to select local files and have them automatically copied and renamed to their correct locations within the project.
+*   **Setup Project Files:** Opens the "File Placer" utility. This tool reads your `project_config.json`, shows the status (Found/Missing) of all required reference files, and provides a simple interface to select local files and have them automatically copied and renamed to their correct locations within the project. **This tool now includes automatic validation for the Ideal Reference Color Checker.** When you provide this file, the tool will immediately run the full patch detection logic and report in the GUI whether the patches were successfully found, giving you instant feedback.
 
 ## Report Outputs and Archiving
 

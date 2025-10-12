@@ -4,35 +4,23 @@ This document outlines the standard workflow for setting up and running an analy
 
 ### Step 1: Create a New Project
 
-First, create a new project using the `create_project.py` script. This will set up the necessary directory structure and default configuration files.
+First, create a new project using the GUI by running `python src/gui.py` and using the "Create Project" tab. This will set up the necessary directory structure and default configuration files.
 
-```bash
-python src/create_project.py --name <your_project_name>
-```
+This command creates a new folder under `data/projects/` and automatically generates two key reference files inside the `dataset` subfolder:
+1.  `default_geometric_align_reference.png`: A large sheet with ArUco markers for perspective correction.
+2.  `default_color_checker_reference.png`: An ideal, digitally perfect color checker with its own ArUco markers.
 
-This command creates a new folder under `data/projects/` with the following structure:
+### Step 2: Add Your Project-Specific Assets
 
-```
-<your_project_name>/
-├── dataset/
-│   ├── reference_color_checker.png
-│   ├── project_color_checker.png
-│   ├── training_images/
-│   ├── drawing_layers/
-│   └── object_reference.png
-├── samples/
-│   └── README.md
-├── project_config.json
-└── dataset_item_processing_config.json
-```
+After creating the project, add your unique files to the generated directories:
 
-### Step 2: Add Your Project Assets
+1.  **Project-Specific Color Checker**: Place a photo of your color checker, taken under your project's specific lighting conditions, into the `dataset/` folder. **You must name this file `project_color_checker.png`** for the default configuration to work.
+2.  **Object Reference**: If using object alignment, place your reference image in `dataset/` and name it `object_reference.png`.
+3.  **Drawing Layers**: If using masking, place your drawing files in `dataset/drawing_layers/`.
+4.  **Training Images**: Place the images that will be used to calculate the target color range in the `dataset/training_images/` directory.
+5.  **Analysis Images**: Place the images you want to analyze into the `samples/` directory.
 
-After creating the project, add your files to the generated directories:
-
-1.  **Reference Files**: Place your ideal `reference_color_checker.png`, the `project_color_checker.png` (shot in your project's lighting), the `object_reference.png`, and any drawing layer images into the `dataset/` sub-folders as named in the default config.
-2.  **Training Images**: Place the images that will be used to calculate the target color range in the `dataset/training_images/` directory.
-3.  **Analysis Images**: Place the images you want to analyze into the `samples/` directory. The README.md inside explains its purpose.
+*Tip: The "Manage Dataset" tab in the main GUI provides a "File Placer" tool to help you copy and rename these files into the correct locations. This tool will also provide **instant validation** for the `default_color_checker_reference.png` file, confirming if its patches can be automatically detected.*
 
 ### Step 3: Update Project Configuration
 
