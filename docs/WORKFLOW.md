@@ -20,7 +20,7 @@ After creating the project, add your unique files to the generated directories:
 4.  **Training Images**: Place the images that will be used to calculate the target color range in the `dataset/training_images/` directory.
 5.  **Analysis Images**: Place the images you want to analyze into the `samples/` directory.
 
-*Tip: The "Manage Dataset" tab in the main GUI provides a "File Placer" tool to help you copy and rename these files into the correct locations. This tool will also provide **instant validation** for the `default_color_checker_reference.png` file, confirming if its patches can be automatically detected.*
+*Tip: The "Manage Dataset" tab in the main GUI provides a "File Placer" tool to help you copy and rename these files into the correct locations. This tool also provides **instant validation** for the `default_color_checker_reference.png` file, confirming if its patches can be automatically detected.*
 
 ### Step 3: Update Project Configuration
 
@@ -97,3 +97,5 @@ python src/main.py \
     --apply-mask \
     --mask-bg-is-white
 ```
+
+*Note on Alignment: If you run a pipeline with color or geometrical alignment and the automatic ArUco marker detection fails, a GUI window will automatically open, allowing you to manually select the corners of the checker or alignment sheet to ensure the analysis can proceed.*

@@ -151,7 +151,7 @@ class ProjectFilePlacerGUI(tk.Toplevel):
                 return
 
             corrector = ColorCorrector()
-            result = corrector.detect_color_checker_patches(image, debug_mode=False)
+            result = corrector.detect_color_checker_patches(image, image, debug_mode=False)
             num_patches = len(result.get("patches", []))
             method = result.get("detection_method", "unknown")
 

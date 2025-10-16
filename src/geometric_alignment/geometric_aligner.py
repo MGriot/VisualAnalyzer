@@ -107,9 +107,14 @@ class ArucoAligner:
         with full debug output.
         """
         debug_paths = {}
+        # Pre-process the source image (image) for more robust marker detection under varied lighting
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        src_corners, src_ids, _ = self.detector.detectMarkers(gray_image)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray_image_enhanced = clahe.apply(gray_image)
+        
+        src_corners, src_ids, _ = self.detector.detectMarkers(gray_image_enhanced)
 
+        # Reference image is pristine, no enhancement needed
         gray_ref_image = cv2.cvtColor(reference_image, cv2.COLOR_BGR2GRAY)
         dst_corners, dst_ids, _ = self.detector.detectMarkers(gray_ref_image)
 

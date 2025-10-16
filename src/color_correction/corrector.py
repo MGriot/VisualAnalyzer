@@ -14,7 +14,15 @@ from src import config
 from src.utils.image_utils import load_image, save_image
 
 # --- NEW IMPORTS for ArUco-based detection ---
-from src.color_correction.patch_detector import ColorCheckerAligner, get_or_generate_reference_checker
+from src.color_correction.alignment import Aligner, get_or_generate_reference_checker
+
+# Imports for robust patch alignment
+from scipy.optimize import linear_sum_assignment
+from skimage.color import rgb2lab, deltaE_cie76
+
+# Assuming these utilities are in your project structure
+from src import config
+from src.utils.image_utils import load_image, save_image
 
 
 def _sort_patches(
@@ -114,7 +122,7 @@ class ColorCorrector:
 
     # --- NEW: Tier 1 ArUco Detection Method ---
     def _detect_patches_with_aruco(
-        self, image: np.ndarray, output_dir: str | None = None, debug_mode: bool = False
+        self, image: np.ndarray, reference_image: np.ndarray, output_dir: str | None = None, debug_mode: bool = False
     ) -> Dict:
         """
         Attempts to detect and extract color checker patches by first aligning the
@@ -124,12 +132,14 @@ class ColorCorrector:
             if debug_mode:
                 print("[DEBUG] Attempting ArUco-based alignment and patch detection.")
             
-            # Get the ideal digital reference checker with ArUco markers
-            reference_checker_img = get_or_generate_reference_checker()
+            # The reference checker image is now passed in directly.
+            reference_checker_img = reference_image
             
-            # Use the aligner from patch_detector.py
-            aligner = ColorCheckerAligner(image)
-            aligned_image = aligner.align_with_aruco(reference_checker_img)
+            # Use the aligner from the new alignment module
+            aligner = Aligner(image)
+            aligned_image = aligner.align_with_aruco(
+                reference_checker_img, debug_mode=debug_mode, output_dir=output_dir
+            )
 
             if aligned_image is None:
                 if debug_mode:
@@ -171,7 +181,7 @@ class ColorCorrector:
 
 
     def detect_color_checker_patches(
-        self, image: np.ndarray, output_dir: str | None = None, debug_mode: bool = False
+        self, image: np.ndarray, reference_image: np.ndarray, output_dir: str | None = None, debug_mode: bool = False
     ) -> Dict:
         """
         Detects color checker patches using a tiered approach, starting with the most robust.
@@ -184,7 +194,7 @@ class ColorCorrector:
         if debug_mode:
             print("[DEBUG] Tier 1: Attempting ArUco-based detection.")
         aruco_result = self._detect_patches_with_aruco(
-            image, output_dir=output_dir, debug_mode=debug_mode
+            image, reference_image, output_dir=output_dir, debug_mode=debug_mode
         )
         # Check for a good number of patches (e.g., at least 20)
         if len(aruco_result.get("patches", [])) >= 20:
@@ -541,11 +551,19 @@ class ColorCorrector:
             ]
             correction_model = self.calculate_correction_model(src_roi, ref_roi, method)
         else:
+            # Create separate subdirectories for debug outputs to avoid overwriting
+            source_output_dir = os.path.join(output_dir, "source_detection") if output_dir else None
+            if source_output_dir: os.makedirs(source_output_dir, exist_ok=True)
+
             source_detection = self.detect_color_checker_patches(
-                source_image, output_dir, debug_mode
+                source_image, reference_image, source_output_dir, debug_mode
             )
+
+            ref_output_dir = os.path.join(output_dir, "ref_detection") if output_dir else None
+            if ref_output_dir: os.makedirs(ref_output_dir, exist_ok=True)
+
             ref_detection = self.detect_color_checker_patches(
-                reference_image, output_dir, debug_mode
+                reference_image, reference_image, ref_output_dir, debug_mode
             )
             source_detection_method = source_detection.get("detection_method")
             ref_detection_method = ref_detection.get("detection_method")

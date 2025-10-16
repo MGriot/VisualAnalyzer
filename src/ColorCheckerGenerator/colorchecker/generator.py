@@ -12,7 +12,7 @@ from .unit_utils import parse_size
 from .color_data import get_colorchecker_classic, get_calibration_colors
 from .drawing_utils import draw_color_grid, hex_to_bgr, put_text_cv2
 from .ruler_utils import generate_ruler_dual
-from .aruco_utils import add_aruco_markers_around
+from .aruco_utils import make_aruco_marker
 from .export_utils import save_image
 from .config import DEFAULT_DPI, DEFAULT_BG
 
@@ -55,34 +55,66 @@ class ColorCheckerGenerator:
     def build(self):
         """
         Build the chart canvas (numpy array BGR).
+        This version creates a full A4 page with the color checker centered
+        and ArUco markers at the corners of the page for robust printing and alignment.
         """
+        # 1. Define A4 page size in pixels (portrait)
+        A4_W_CM, A4_H_CM = 21.0, 29.7
+        page_w_px = int(A4_W_CM * self.dpi / 2.54)
+        page_h_px = int(A4_H_CM * self.dpi / 2.54)
+        self.canvas = np.ones((page_h_px, page_w_px, 3), dtype=np.uint8) * 255  # White A4 page
+
+        # 2. Build the color checker grid.
+        # The size of the checker itself is now independent of the page size argument.
+        # Let's make it a fixed physical width, e.g., 18cm, to leave room for margins.
+        checker_w_cm = 18.0
+        checker_w_px = int(checker_w_cm * self.dpi / 2.54)
+
+        # Build the core grid at its default pixel size first
         if self.checker_type == "classic":
-            self.canvas = self._build_classic()
-        elif self.checker_type == "calibration_card":
-            self.canvas = self._build_calibration_card()
-        elif self.checker_type == "greyscale":
-            self.canvas = self._build_greyscale_only()
-        elif self.checker_type == "combined":
-            self.canvas = self._build_combined()
+            color_grid = self._build_color_grid()
         else:
-            raise ValueError("Unknown checker_type")
+            # Fallback for other types to ensure ArUco reference generation works.
+            color_grid = self._build_color_grid()
 
-        # Optionally add rulers
-        if self.include_ruler != "none":
-            ruler = generate_ruler_dual(self.canvas.shape[1], dpi=self.dpi, mode=self.include_ruler)
-            self.canvas = np.vstack([ruler, self.canvas, ruler])
+        # Scale the grid to our desired physical size
+        scale = checker_w_px / color_grid.shape[1]
+        checker_h_px = int(color_grid.shape[0] * scale)
+        scaled_color_grid = cv2.resize(color_grid, (checker_w_px, checker_h_px), interpolation=cv2.INTER_AREA)
 
-        # Optionally add ArUco markers after rulers so they sit outside everything
+        # 3. Place the checker in the center of the A4 page
+        x_offset = (page_w_px - checker_w_px) // 2
+        y_offset = (page_h_px - checker_h_px) // 2
+        self.canvas[y_offset:y_offset + checker_h_px, x_offset:x_offset + checker_w_px] = scaled_color_grid
+
+        # 4. Add ArUco markers if requested
         if self.include_aruco:
-            self.canvas = add_aruco_markers_around(self.canvas)
+            # Place markers at the corners of the A4 page.
+            # Use a physical size for them, e.g., 2.5 cm, for robustness.
+            marker_size_cm = 2.5
+            marker_size_px = int(marker_size_cm * self.dpi / 2.54)
+            
+            # Use a margin from the page edge, e.g., 1.5 cm
+            margin_cm = 1.5
+            margin_px = int(margin_cm * self.dpi / 2.54)
 
-        # Finally scale to requested width if needed
-        self._scale_to_target_width()
+            markers = [make_aruco_marker(i, marker_size_px) for i in range(4)]
+            
+            # Top-left
+            self.canvas[margin_px:margin_px + marker_size_px, margin_px:margin_px + marker_size_px] = markers[0]
+            # Top-right
+            self.canvas[margin_px:margin_px + marker_size_px, -margin_px - marker_size_px:-margin_px] = markers[1]
+            # Bottom-left
+            self.canvas[-margin_px - marker_size_px:-margin_px, margin_px:margin_px + marker_size_px] = markers[2]
+            # Bottom-right
+            self.canvas[-margin_px - marker_size_px:-margin_px, -margin_px - marker_size_px:-margin_px] = markers[3]
 
         # Optional overlay logo or text
         if self.logo_text:
-            h = self.canvas.shape[0]
-            self.canvas = put_text_cv2(self.canvas, self.logo_text, (20, h-30), font_size=24, color=(30,30,30))
+            # Place logo text relative to the checker, not the whole page
+            text_y = y_offset + checker_h_px + 60
+            text_x = x_offset
+            self.canvas = put_text_cv2(self.canvas, self.logo_text, (text_x, text_y), font_size=48, color=(30, 30, 30))
 
         return self.canvas
 
@@ -151,6 +183,12 @@ class ColorCheckerGenerator:
                 x1 = x0 + patch_w
                 y1 = y0 + patch_h
                 cv2.rectangle(grid, (x0, y0), (x1, y1), bgr, -1)
+                # Add a black border to help with patch detection
+                cv2.rectangle(grid, (x0, y0), (x1, y1), (0, 0, 0), 2)
+
+        # Draw a thick black border around the entire grid to further help isolation
+        h, w, _ = grid.shape
+        cv2.rectangle(grid, (0, 0), (w - 1, h - 1), (0, 0, 0), 10)
 
         return grid
 

@@ -14,31 +14,28 @@ This phase is responsible for locating the 24 individual color patches on the co
     2.  It matches them to the markers on the ideal reference checker.
     3.  The corresponding corner points are used to calculate the homography matrix `H`.
     4.  This matrix is used to apply a perspective warp to the source image, effectively "straightening out" the color checker to match the reference.
-    5.  Because the checker is now perfectly aligned, the 24 patches can be extracted by simply slicing a known grid.
 -   **Result:** This is the most precise method, as it corrects for perspective distortion before patch extraction.
 
-### Tier 2: Robust OpenCV (Hough Transform)
+### Tier 2: Manual GUI Fallback
 
--   **Theory (Edge & Line Detection):** If ArUco markers are not found, the system falls back to analyzing the structure of the color checker itself. The boundaries between color patches form a grid. This grid can be identified by finding strong edges and inferring the lines that form them.
+-   **Theory (User-in-the-Loop):** If automatic marker detection fails, the system falls back to a manual, user-guided approach.
 -   **Process:**
-    1.  The image is converted to grayscale.
-    2.  **Canny edge detection** is applied to find high-gradient pixels (edges).
-    3.  A **Hough Line Transform** is then used on the edge map. This algorithm can detect lines by converting points from Cartesian space to a parameter space (Hough space) and finding intersections.
-    4.  The detected lines are clustered into horizontal and vertical groups to define the rows and columns of the grid.
-    5.  Patches are extracted from the cells of this detected grid.
--   **Result:** This method is effective for well-lit color checkers, even those without physical gaps between patches.
+    1.  A GUI window automatically opens, displaying the color checker image.
+    2.  The user is prompted to click on the four corners of the color checker grid.
+    3.  These four manually selected points are used to compute the homography matrix and perform the perspective warp.
+-   **Result:** This provides a robust fallback that guarantees the alignment can be completed even when automatic methods fail due to poor lighting, obstructions, or missing markers.
 
-### Tier 3: YOLOv8 Object Detection
+### Tier 3: Simple Grid Sampling (Primary Detection)
 
--   **Theory (Convolutional Neural Networks):** If the grid structure is not clear enough for the Hough Transform, a deep learning approach is used. YOLO (You Only Look Once) is a state-of-the-art, real-time object detection system. A pre-trained YOLOv8 model is used to directly identify the location of each color patch.
--   **Process:** The image is passed to the YOLOv8 model, which returns the bounding boxes for all color patches it recognizes.
--   **Result:** This method is robust to some rotation and distortion but is dependent on the quality and variety of the data the model was trained on.
+-   **Theory:** After alignment, the primary method for patch detection assumes the checker is now a perfect, oriented rectangle and uses a simple grid overlay.
+-   **Process:** The aligned image is divided into a 4x6 grid. To avoid edge artifacts or the black borders between patches, the color is not sampled from the entire grid cell. Instead, the average color is calculated from only the central 50% of each cell.
+-   **Result:** This method is extremely fast and accurate, provided the initial alignment was successful.
 
-### Tier 4: Simple Grid Slicing
+### Tier 4: Advanced Fallbacks (Contour & Mask-Based)
 
--   **Theory:** This is the simplest fallback and assumes the color checker is the largest contour in the image and is oriented correctly.
--   **Process:** It finds the bounding box of the largest object and divides it into a uniform 4x6 grid.
--   **Result:** This method is fast but not robust to any rotation or perspective distortion.
+-   **Theory:** If the simple grid sampling fails (which is unlikely after a successful alignment), the system falls back to more complex contour-based methods. These methods analyze the image to find the outlines of the 24 patches, using properties like area and shape to identify them.
+-   **Process:** These fallbacks use adaptive thresholding and contour analysis to find the patches, and can include mask-based extraction for higher precision.
+-   **Result:** These methods are more computationally intensive but provide a final layer of robustness.
 
 ## Phase 2: Patch Matching & Alignment
 

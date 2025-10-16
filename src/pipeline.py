@@ -185,79 +185,70 @@ class Pipeline:
 
     def _perform_color_correction(self):
         """
-        Applies color correction. Prioritizes on-the-fly correction using a sample-specific
-        color checker if provided, otherwise falls back to the pre-calculated project matrix.
+        Applies color correction. Prioritizes on-the-fly correction, which includes
+        manual fallbacks. Falls back to a pre-calculated project matrix if on-the-fly fails.
         """
         step_dir = self.report_generator.get_step_output_dir("color_correction")
 
-        # Scenario 1: On-the-fly correction with a sample-specific checker
-        if self.args.sample_color_checker and os.path.exists(self.args.sample_color_checker):
-            project_files = self.project_manager.get_project_file_paths(self.args.project, self.args.debug)
-            ideal_checker_path = project_files.get("reference_color_checker")
+        # --- Scenario 1: On-the-fly correction (Primary) ---
+        project_files = self.project_manager.get_project_file_paths(self.args.project, self.args.debug)
+        ideal_checker_path = project_files.get("reference_color_checker")
 
-            if not ideal_checker_path:
-                print("[WARNING] Cannot perform on-the-fly correction: ideal reference_color_checker_path not set in project.")
-                return
-
+        if ideal_checker_path:
             if self.args.debug:
-                print(f"[DEBUG] Performing on-the-fly color correction using sample checker: {self.args.sample_color_checker}")
-            
+                print(f"[DEBUG] Attempting on-the-fly correction with ColorCorrectionPipeline.")
+
             try:
-                # Step 1: Calculate the correction model using the provided checker images.
-                model_calc_result = self.color_corrector.calculate_correction_from_images(
-                    source_image_path=self.args.sample_color_checker,
-                    reference_image_path=str(ideal_checker_path),
+                from src.color_correction.color_correction_pipeline import ColorCorrectionPipeline
+
+                correction_pipeline = ColorCorrectionPipeline(
+                    reference_color_checker_path=str(ideal_checker_path),
                     output_dir=step_dir,
-                    debug_mode=self.args.debug,
-                    method=self.args.color_correction_method
+                    debug_mode=self.args.debug
                 )
-                
-                correction_model = model_calc_result["correction_model"]
 
-                # Step 2: Apply the calculated model to the main image being processed.
-                self.image_to_be_processed = self.color_corrector.apply_correction_model(
-                    self.image_to_be_processed,
-                    correction_model,
-                    method=self.args.color_correction_method
+                result = correction_pipeline.run(
+                    image_to_correct=self.image_to_be_processed,
+                    photo_of_checker_path=self.args.sample_color_checker,
+                    correction_method=self.args.color_correction_method
                 )
-                
-                self.pipeline_image_stages["color_corrected"] = self.image_to_be_processed.copy()
 
-                if self.args.debug:
-                    path = os.path.join(step_dir, "04_corrected_main_image_on_the_fly.png")
-                    save_image(path, self.image_to_be_processed)
-                    model_calc_result.setdefault("debug_paths", {})["corrected_main_image"] = path
+                if result and result.get("corrected_image") is not None:
+                    self.image_to_be_processed = result["corrected_image"]
+                    self.pipeline_image_stages["color_corrected"] = self.image_to_be_processed.copy()
 
-                # Add debug info to the report
-                self.debug_data_for_report["color_correction_method"] = self.args.color_correction_method
-                
-                serializable_model = {}
-                if 'matrix' in correction_model:
-                    serializable_model['matrix'] = correction_model['matrix'].tolist()
-                if 'luts' in correction_model:
-                    serializable_model['luts'] = [lut.tolist() for lut in correction_model['luts']]
-                
-                self.debug_data_for_report["color_correction_model_on_the_fly"] = serializable_model
-                
-                if model_calc_result.get("debug_paths"):
-                    for key, path in model_calc_result["debug_paths"].items():
-                        title = key.replace("_", " ").title()
-                        self.debug_image_pipeline.append({
-                            "title": f"{self.pipeline_step_counter}. CC: {title}",
-                            "path": os.path.relpath(path, self.report_generator.project_output_dir),
-                        })
-                    self.pipeline_step_counter += 1
-
-                return
+                    self.debug_data_for_report["color_correction_method"] = self.args.color_correction_method
+                    correction_model = result.get("correction_model", {})
+                    serializable_model = {}
+                    if 'matrix' in correction_model and correction_model['matrix'] is not None:
+                        serializable_model['matrix'] = correction_model['matrix'].tolist()
+                    if 'luts' in correction_model and correction_model['luts'] is not None:
+                        serializable_model['luts'] = [lut.tolist() for lut in correction_model['luts']]
+                    self.debug_data_for_report["color_correction_model_on_the_fly"] = serializable_model
+                    
+                    if self.args.debug and result.get("debug_paths"):
+                        for key, path in sorted(result["debug_paths"].items()):
+                            title = key.replace("_", " ").title()
+                            self.debug_image_pipeline.append({
+                                "title": f"{self.pipeline_step_counter}. CC: {title}",
+                                "path": os.path.relpath(path, self.report_generator.project_output_dir),
+                            })
+                        self.pipeline_step_counter += 1
+                    
+                    return  # On-the-fly correction successful
 
             except Exception as e:
-                print(f"[WARNING] On-the-fly color correction failed: {e}")
+                print(f"[WARNING] On-the-fly color correction failed with an unexpected error: {e}")
                 if self.args.debug:
                     import traceback
                     traceback.print_exc()
-                return
+        else:
+            print("[WARNING] Cannot perform on-the-fly correction: ideal reference_color_checker_path not set in project.")
 
-        # Scenario 2: Apply the pre-calculated project matrix
+        # --- Scenario 2: Fallback to pre-calculated project matrix ---
+        if self.args.debug:
+            print("[DEBUG] On-the-fly correction failed or was not possible. Falling back to pre-calculated matrix.")
+        
         correction_model = self.project_data.get("correction_matrix")
         if correction_model is not None:
             if self.args.debug:
@@ -280,7 +271,7 @@ class Pipeline:
                 })
                 self.pipeline_step_counter += 1
         elif self.args.debug:
-            print("[DEBUG] No color correction matrix available or calculated. Skipping step.")
+            print("[DEBUG] No color correction matrix available. Skipping color correction entirely.")
     def _perform_geometrical_alignment(self):
         step_dir = self.report_generator.get_step_output_dir("geometrical_alignment")
         aligner = Aligner(debug_mode=self.args.debug, output_dir=step_dir)
