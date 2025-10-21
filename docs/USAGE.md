@@ -70,7 +70,7 @@ For each analysis run, the tool generates all output files (images, charts, arch
 Inside this folder, you will find:
 
 1.  **PDF Report:** A detailed PDF report. If using the GUI, you will be prompted where to save this file. If using the CLI, it will be saved inside this output folder.
-2.  **State Archive:** A `.gri` (Gemini Report Information) file containing the data required to regenerate the report. This is saved in the `archives/` sub-directory.
+2.  **State Archive:** A `.gri` (Griot Report Information) file containing the data required to regenerate the report. This is saved in the `archives/` sub-directory.
 
 ### Report Regeneration
 

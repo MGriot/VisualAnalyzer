@@ -36,7 +36,7 @@ class ReportArchiver:
 
     def archive_report(self, serializable_data: dict):
         """
-        Serializes the provided report data into a `.gri` (Gemini Report Information) file.
+        Serializes the provided report data into a `.gri` (Griot Report Information) file.
 
         The filename is generated based on the current timestamp and a part number
         extracted from the `serializable_data`.
