@@ -124,6 +124,10 @@ The application can be launched either via a Graphical User Interface (GUI) or t
 *   **GUI:** To start the GUI, run `src/gui.py`.
     ```bash
     python src/gui.py
+
+    #or
+
+    .\.venv\Scripts\python.exe -m src.gui --debug
     ```
     The GUI provides an intuitive way to create projects, manage reference files, and configure analysis options.
 
