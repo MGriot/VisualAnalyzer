@@ -17,7 +17,7 @@ The `main.py` script provides a variety of command-line arguments to customize t
 ### Core Arguments
 
 *   `--project <project_name>`: **(Required)** Specifies the project to use for the analysis. The project must be a directory in the `data/projects` folder.
-*   `--image <path>`: Path to a single image file or a directory of images for analysis.
+*   `--image <path>`: Path to a single image file or a directory of images for analysis. The filename can be structured to automatically extract metadata for the report; see `WORKFLOW.md` for details.
 *   `--video <path>`: Path to a video file for analysis.
 *   `--camera`: Use a live camera stream for analysis.
 *   `--debug`: Enable debug mode. This will generate a more detailed report with intermediate steps and data, and print verbose output to the console.

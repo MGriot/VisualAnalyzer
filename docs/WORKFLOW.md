@@ -18,7 +18,22 @@ After creating the project, add your unique files to the generated directories:
 2.  **Object Reference**: If using object alignment, place your reference image in `dataset/` and name it `object_reference.png`.
 3.  **Drawing Layers**: If using masking, place your drawing files in `dataset/drawing_layers/`.
 4.  **Training Images**: Place the images that will be used to calculate the target color range in the `dataset/training_images/` directory.
-5.  **Analysis Images**: Place the images you want to analyze into the `samples/` directory.
+5.  **Analysis Images & Metadata**: Place the images you want to analyze into the `samples/` directory.
+
+    > **IMPORTANT**: The filename of your analysis images is used to automatically extract the **Part Number (PN)** and **Thickness** for the final report.
+    >
+    > The system expects the following format:
+    > `PREFIX_ANYTHING_PARTNUMBER_THICKNESS_... .ext`
+    >
+    > - **Part Number**: The 3rd element separated by underscores.
+    > - **Thickness**: The 4th element separated by underscores.
+    >
+    > **Example:**
+    > For an image named `PROJECTA_SAMPLE_PN12345_1.5mm_test.jpg`:
+    > - The Part Number will be `PN12345`.
+    > - The Thickness will be `1.5mm`.
+    >
+    > If the filename does not follow this structure, the entire filename becomes the Part Number and Thickness is marked "N/A".
 
 *Tip: The "Manage Dataset" tab in the main GUI provides a "File Placer" tool to help you copy and rename these files into the correct locations. This tool also provides **instant validation** for the `default_color_checker_reference.png` file, confirming if its patches can be automatically detected.*
 

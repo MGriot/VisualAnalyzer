@@ -145,6 +145,29 @@ class ColorCorrectionPipeline:
         if self.debug_mode: print("--- Color Correction Pipeline Finished ---\n")
         return {"corrected_image": corrected_image, "correction_model": correction_model, "debug_paths": self.debug_paths}
 
+    def run_patch_detection_on_image(self, image: np.ndarray) -> Dict:
+        """
+        Runs only the patch detection stage on a given image for validation purposes.
+
+        Args:
+            image: The image on which to detect color checker patches.
+
+        Returns:
+            A dictionary containing the detected 'patches', their 'patch_coords',
+            and the 'detection_method' used.
+        """
+        if image is None or image.size == 0:
+            return {"patches": [], "patch_coords": [], "detection_method": "error"}
+
+        # Use the pipeline's internal multi-stage detection method.
+        patches, coords = self._detect_patches_from_image(image, "validation")
+
+        detection_method = "multi-stage"
+        if not patches:
+            detection_method = "failed"
+
+        return {"patches": patches, "patch_coords": coords, "detection_method": detection_method}
+
     def _crop_checkers_geometrically(self, aligned_source_img: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """
         Crops both images by finding the area defined by markers, then using morphological

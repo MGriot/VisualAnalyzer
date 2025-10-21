@@ -28,6 +28,7 @@ import numpy as np
 import warnings
 import matplotlib.pyplot as plt
 import pickle
+import datetime
 
 # Suppress NumPy warnings that might arise from operations like empty slices
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
@@ -87,6 +88,7 @@ class Pipeline:
         self.image_to_be_processed = None
         self.analysis_results = None
         self.metadata = None
+        self.metadata_overrides = None  # Add override placeholder
         self.debug_data_for_report = {}
         self.debug_image_pipeline = []
         self.pipeline_step_counter = 1
@@ -101,23 +103,25 @@ class Pipeline:
                 f"Loaded project '{self.args.project}' with HSV range: {self.project_data['lower_hsv']} - {self.project_data['upper_hsv']}"
             )
 
-    def process_image(self, image_path):
+    def process_image(self, image_path, part_number=None, thickness=None):
         self.image_path = image_path
-        if self.args.debug:
-            print(
-                f"[DEBUG] Inside process_image. args.object_alignment = {self.args.object_alignment}"
-            )
-            print(f"Processing single image: {self.image_path}")
+        self.metadata_overrides = {"part_number": part_number, "thickness": thickness}
 
-        sample_name = None
-        path_parts = self.image_path.split(os.sep)
-        if "samples" in path_parts:
-            sample_index = path_parts.index("samples") + 1
-            if sample_index < len(path_parts):
-                sample_name = path_parts[sample_index]
+        # --- Step 1: Extract metadata early to determine output path ---
+        self._extract_metadata()
 
+        # --- Step 2: Create a unique, descriptive folder name ---
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        pn = self.metadata.get("part_number", "PN-NA")
+        thick = self.metadata.get("thickness", "THICK-NA")
+        # Sanitize for folder names
+        safe_pn = "".join(c for c in pn if c.isalnum() or c in ('-', '_')).rstrip()
+        safe_thick = "".join(c for c in thick if c.isalnum() or c in ('-', '_')).rstrip()
+        output_folder_name = f"{timestamp}_{safe_pn}_{safe_thick}"
+
+        # --- Step 3: Instantiate the report generator with the new path ---
         self.report_generator = ReportGenerator(
-            self.args.project, sample_name=sample_name, debug_mode=self.args.debug
+            self.args.project, sample_name=output_folder_name, debug_mode=self.args.debug
         )
 
         self.original_input_image_bgr, _ = load_image(self.image_path)
@@ -571,6 +575,12 @@ class Pipeline:
             self.pipeline_step_counter += 1
 
     def _extract_metadata(self):
+        # Prioritize metadata from GUI if available
+        if self.metadata_overrides and self.metadata_overrides.get("part_number"):
+            self.metadata = self.metadata_overrides
+            return
+
+        # Fallback to parsing the filename
         file_name_without_ext = os.path.splitext(os.path.basename(self.image_path))[0]
         file_parts = file_name_without_ext.split("_")
         if len(file_parts) >= 3:
@@ -581,7 +591,7 @@ class Pipeline:
             thickness = "N/A"
         self.metadata = {"part_number": part_number, "thickness": thickness}
 
-    def generate_report(self):
+    def generate_report(self, external_pdf_path: str = None):
         if self.analysis_results is None:
             print("[WARNING] No analysis results to generate report from.")
             return None
@@ -593,6 +603,7 @@ class Pipeline:
             self.analysis_results,
             self.metadata,
             debug_data=self.debug_data_for_report,
+            external_pdf_path=external_pdf_path,
         )
         return report_data
 
@@ -624,22 +635,25 @@ def run_analysis(args):
 
         if args.image:
             if os.path.isdir(args.image):
+                # Batch mode doesn't support interactive report saving
                 results = []
                 for filename in os.listdir(args.image):
                     if filename.lower().endswith((".png", ".jpg", ".jpeg")):
                         image_path = os.path.join(args.image, filename)
                         pipeline.process_image(image_path)
                         results.append(pipeline.analysis_results)
-                return results
+                return None # Return None as batch mode doesn't return a single pipeline
             else:
-                pipeline.process_image(args.image)
+                part_number = getattr(args, 'part_number', None)
+                thickness = getattr(args, 'thickness', None)
+                pipeline.process_image(
+                    args.image, part_number=part_number, thickness=thickness
+                )
                 if args.save_state_to:
                     pipeline.save_state(args.save_state_to)
-                return pipeline.analysis_results
+                return pipeline # Return the whole instance
 
         if args.video:
-            # Video processing is not fully integrated into the new class structure yet.
-            # This part needs to be adapted.
             process_video(args, pipeline)
 
         return None

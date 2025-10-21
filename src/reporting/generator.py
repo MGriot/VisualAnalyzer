@@ -355,7 +355,7 @@ class ReportGenerator:
             processed_items.append(processed_item)
         return processed_items
 
-    def _generate_reportlab_pdf(self, report_data: dict, base_dir: Path, pdf_path: str):
+    def _generate_reportlab_pdf(self, report_data: dict, base_dir: Path, pdf_path_override: str = None):
         """
         Generates a PDF report using the ReportLab library.
 
@@ -365,8 +365,16 @@ class ReportGenerator:
         Args:
             report_data (dict): A dictionary containing all the data required for the report.
             base_dir (Path): The base directory from which relative image paths are resolved.
-            pdf_path (str): The full path where the generated PDF will be saved.
+            pdf_path_override (str, optional): If provided, save the PDF to this exact path.
+                                               Otherwise, generate a default path.
         """
+        if pdf_path_override:
+            pdf_path = pdf_path_override
+        else:
+            prefix = "debug_" if self.debug_mode else ""
+            part_number = report_data.get("part_number", "report")
+            pdf_path = self.project_output_dir / f"{prefix}{part_number}_reportlab.pdf"
+
         doc = SimpleDocTemplate(str(pdf_path), pagesize=A4, topMargin=inch/2, bottomMargin=inch/2)
         styles = getSampleStyleSheet()
         story = []
@@ -518,7 +526,7 @@ class ReportGenerator:
         if self.debug_mode:
             print(f"ReportLab PDF report saved to {pdf_path}")
 
-    def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None):
+    def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None, external_pdf_path: str = None):
         """
         Generates all specified report files (HTML, PDF) from the analysis results.
 
@@ -574,7 +582,7 @@ class ReportGenerator:
 
         template_vars['analysis_results_raw'] = analysis_results
 
-        self.generate_from_archived_data(template_vars, self.project_output_dir, is_regeneration=False)
+        self.generate_from_archived_data(template_vars, self.project_output_dir, is_regeneration=False, external_pdf_path=external_pdf_path)
 
         # Create a serializable object that includes the numpy arrays
         serializable_data = template_vars.copy()
@@ -591,7 +599,7 @@ class ReportGenerator:
 
         return template_vars
 
-    def generate_from_archived_data(self, report_data: dict, base_dir: Path, is_regeneration: bool = True):
+    def generate_from_archived_data(self, report_data: dict, base_dir: Path, is_regeneration: bool = True, external_pdf_path: str = None):
         """
         Generates HTML and PDF reports from a pre-existing data dictionary (e.g., from an archive).
 
@@ -602,19 +610,24 @@ class ReportGenerator:
             base_dir (Path): The base directory from which relative image paths are resolved.
             is_regeneration (bool, optional): If True, prefixes output filenames with "regenerated_".
                                              Defaults to True.
+            external_pdf_path (str, optional): An explicit path to save the PDF to.
         """
-        # ReportLab PDF Generation
-        prefix = ""
-        if is_regeneration:
-            prefix = "regenerated_"
-        elif self.debug_mode:
-            prefix = "debug_"
-        part_number = report_data.get("part_number", "report")
-        if HAS_REPORTLAB:
-            reportlab_pdf_path = self.project_output_dir / f"{prefix}{part_number}_reportlab.pdf"
-            try:
-                self._generate_reportlab_pdf(report_data, base_dir, reportlab_pdf_path)
-            except Exception as e:
-                print(f"[WARNING] Failed to generate ReportLab PDF: {e}")
-        else:
+        if not HAS_REPORTLAB:
             print("[WARNING] reportlab not installed. Skipping ReportLab PDF generation.")
+            return
+
+        pdf_path = external_pdf_path
+        # If no external path is given (e.g., not from GUI), create a default path
+        if not pdf_path:
+            prefix = ""
+            if is_regeneration:
+                prefix = "regenerated_"
+            elif self.debug_mode:
+                prefix = "debug_"
+            part_number = report_data.get("part_number", "report")
+            pdf_path = self.project_output_dir / f"{prefix}{part_number}_reportlab.pdf"
+
+        try:
+            self._generate_reportlab_pdf(report_data, base_dir, pdf_path_override=pdf_path)
+        except Exception as e:
+            print(f"[WARNING] Failed to generate ReportLab PDF: {e}")
