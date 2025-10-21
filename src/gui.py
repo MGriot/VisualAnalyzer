@@ -247,20 +247,28 @@ class VisualAnalyzerGUI(tk.Tk):
             try:
                 with open(file_path, 'rb') as f:
                     saved_data = pickle.load(f)
-                
-                # Handle both old and new data structures gracefully.
+
+                project_name = 'Unknown'
+                metadata = {}
+                analysis_results = {}
+
+                # Safely extract data from both new (dict) and old (object) formats
                 if isinstance(saved_data, dict):
+                    project_name = saved_data.get('project_name', 'Unknown')
                     metadata = saved_data.get('metadata', {})
                     analysis_results = saved_data.get('analysis_results_raw', {})
-                    project_name = saved_data.get('project_name', 'Unknown')
-                else: # Assuming old Pipeline object structure
+                else: # Assuming old Pipeline object
+                    project_name = getattr(saved_data.args, 'project', 'Unknown') if hasattr(saved_data, 'args') else 'Unknown'
                     metadata = getattr(saved_data, 'metadata', {})
                     analysis_results = getattr(saved_data, 'analysis_results', {})
-                    project_name = getattr(saved_data.args, 'project', 'Unknown')
-
-                # Ensure metadata and analysis_results are dicts for safe access
+                
                 metadata = metadata if isinstance(metadata, dict) else {}
                 analysis_results = analysis_results if isinstance(analysis_results, dict) else {}
+
+                # Calculate percentage manually for robustness
+                matched = analysis_results.get('matched_pixels', 0)
+                total = analysis_results.get('total_pixels', 0)
+                percentage = (matched / total) * 100 if total > 0 else 0.0
 
                 self.history_data.append({
                     'gri_path': file_path,
@@ -268,7 +276,7 @@ class VisualAnalyzerGUI(tk.Tk):
                     'project': project_name,
                     'part_number': metadata.get('part_number', 'N/A'),
                     'thickness': metadata.get('thickness', 'N/A'),
-                    'percentage': analysis_results.get('percentage_of_total', 0.0)
+                    'percentage': percentage
                 })
 
             except Exception as e:
@@ -342,26 +350,40 @@ class VisualAnalyzerGUI(tk.Tk):
             with open(gri_path, 'rb') as f:
                 saved_data = pickle.load(f)
 
+            # Determine a default name for the save dialog
+            pn = "report"
+            if isinstance(saved_data, dict):
+                pn = saved_data.get('metadata', {}).get('part_number', 'report')
+            else:
+                pn = getattr(saved_data, 'metadata', {}).get('part_number', 'report')
+            default_filename = f"regenerated_{pn}.pdf"
+
+            # Ask user where to save the new PDF
+            save_path = filedialog.asksaveasfilename(
+                title="Save Regenerated PDF Report As...",
+                initialfile=default_filename,
+                defaultextension=".pdf",
+                filetypes=[("PDF Documents", "*.pdf")]
+            )
+
+            if not save_path:
+                messagebox.showinfo("Cancelled", "Report regeneration was cancelled.")
+                return
+
             messagebox.showinfo("Regenerating Report", f"Regenerating report from {gri_path.name}. This may take a moment.")
 
             # Handle both old and new .gri formats
             if isinstance(saved_data, dict):
-                # New format: data is a dictionary
                 report_data = saved_data
-                if self.recreate_debug_var.get():
-                    report_data['debug_data'] = report_data.get('debug_data', {})
-                elif 'debug_data' in report_data:
-                    report_data['debug_data'] = None
-                
                 report_generator = ReportGenerator(project_name=report_data.get('project_name'), sample_name=report_data.get('part_number'), debug_mode=self.recreate_debug_var.get())
-                report_generator.generate_from_archived_data(report_data, base_dir=gri_path.parent.parent)
+                report_generator.generate_from_archived_data(report_data, base_dir=gri_path.parent.parent, external_pdf_path=save_path)
             else:
                 # Old format: data is a full Pipeline object
                 pipeline_state = saved_data
                 pipeline_state.args.debug = self.recreate_debug_var.get()
-                pipeline_state.generate_report()
+                pipeline_state.generate_report(external_pdf_path=save_path)
 
-            messagebox.showinfo("Success", "Report regenerated successfully!")
+            messagebox.showinfo("Success", f"Report saved successfully to:\n{save_path}")
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to regenerate report: {e}")

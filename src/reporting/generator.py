@@ -418,15 +418,19 @@ class ReportGenerator:
         story.append(Spacer(1, 0.2*inch))
 
         meta_table = Table([
-            ['Author:', report_data.get('author', 'N/A'), 'Part Number:', report_data.get('part_number', 'N/A')],
-            ['Date:', report_data.get('today', 'N/A'), 'Thickness:', report_data.get('thickness', 'N/A')]
+            ['Author:', report_data.get('author', 'N/A'), 'Part Number:', report_data.get('metadata', {}).get('part_number', 'N/A')],
+            ['Date:', report_data.get('today', 'N/A'), 'Thickness:', report_data.get('metadata', {}).get('thickness', 'N/A')]
         ], colWidths=[1*inch, 2.5*inch, 1*inch, 2.5*inch])
         story.append(meta_table)
         story.append(Spacer(1, 0.2*inch))
 
         add_image('analyzed_image_path', 'Image Before Color Analysis')
         add_image('contours_image_path', 'Image After Color Analysis (with Contours)')
-        add_image('pie_chart_path', 'Pixel-Percentage Pie Chart', width=4*inch)
+        
+        # Safely get analysis results for pie chart
+        analysis_results = report_data.get('analysis_results_raw', {})
+        pie_chart_path = self._generate_pie_chart(analysis_results.get('matched_pixels', 0), analysis_results.get('total_pixels', 0), analysis_results.get('selected_colors', []))
+        add_image(pie_chart_path, 'Pixel-Percentage Pie Chart', width=4*inch)
 
         # --- Debug Section ---
         if self.debug_mode and "debug_data" in report_data:
@@ -587,6 +591,7 @@ class ReportGenerator:
         # Create a serializable object that includes the numpy arrays
         serializable_data = template_vars.copy()
         serializable_data['analysis_results_raw'] = analysis_results
+        serializable_data['metadata'] = metadata
         serializable_data['numpy_images'] = {
             'original': analysis_results.get('original_image'),
             'processed': analysis_results.get('processed_image'),

@@ -65,16 +65,19 @@ For a detailed guide on all GUI features, including the interactive manual align
 
 ## Report Outputs and Archiving
 
-For each analysis run, the tool generates several output files in the `output/<project_name>/<sample_name>/` directory:
+For each analysis run, the tool generates all output files (images, charts, archives) into a unique directory inside `output/<project_name>/`. The directory is named using the format `<timestamp>_<part-number>_<thickness>`.
 
-1.  **PDF Report:** A detailed PDF report generated with ReportLab (`<sample_name>_reportlab.pdf`).
-2.  **State Archive:** A `.gri` (Gemini Report Information) file containing the entire pipeline state, created using Python's `pickle` module. These are stored in the `archives/` subdirectory.
+Inside this folder, you will find:
 
-*Note: The specific reports generated depends on the `--report-type` argument and whether the required libraries are installed.*
+1.  **PDF Report:** A detailed PDF report. If using the GUI, you will be prompted where to save this file. If using the CLI, it will be saved inside this output folder.
+2.  **State Archive:** A `.gri` (Gemini Report Information) file containing the data required to regenerate the report. This is saved in the `archives/` sub-directory.
 
-### Report Regeneration from State
+### Report Regeneration
 
-You can regenerate any report from its `.gri` state file using the `regenerate_from_state.py` script. This is useful for recreating a report with different settings (like `--report-type`) without re-running the entire analysis.
+Reports can be regenerated from their `.gri` state file.
+
+*   **Recommended Method (GUI)**: Use the **"History & Reports"** tab in the main GUI (`python -m src.gui`). This provides a user-friendly interface to find, filter, and regenerate reports.
+*   **Alternative Method (CLI)**: You can use the `regenerate_from_state.py` script. This is useful for batch processing or running outside the GUI.
 
 **Usage:**
 ```bash

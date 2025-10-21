@@ -14,22 +14,13 @@ For a deeper, university-level explanation of the core algorithms used in this p
 
 ## Features
 
-*   **Project-Based Management:** Organize your work into projects, each with its own configuration. A helper script scaffolds new projects, automatically generating a standard reference color checker with ArUco markers.
-*   **Advanced Color Correction:** Corrects color using various algorithms (Linear, Polynomial, HSV, Histogram). This process is highly robust:
-    1.  It uses a tiered fallback system to detect color checker patches: **ArUco Alignment** → **Robust OpenCV (Hough Transform)** → **YOLOv8** → **Simple Grid Slicing**.
-    2.  It then uses a sophisticated matching algorithm (Hungarian algorithm with CIELAB color difference) to intelligently pair detected patches with reference patches, making the system resilient to missing patches, false detections, or incorrect ordering.
-*   **Two-Stage Alignment:**
-    *   **Geometrical Alignment:** Corrects perspective distortion using ArUco markers.
-    *   **Object Alignment:** Aligns the primary object in an image to a reference template using a new geometric fitting algorithm. It prioritizes matching a 5-point pentagon circumscribed around the object and falls back to a 4-point bounding box for robust alignment. It also includes shadow removal techniques to improve contour detection.
-*   **Multi-Layer Background Removal:** Programmatically remove the background from an image by using up to three layers of technical drawings as masks.
-*   **Symmetry Analysis:** Analyze the symmetry of an object's binary mask, providing quantitative scores for vertical/horizontal reflection, 90/180-degree rotation, and more.
-*   **Flexible Input:** Analyze single images, directories of images, video files, or live camera streams.
-*   **Interactive Project Setup:** A Tkinter-based GUI is provided to interactively:
-    *   Define specific points on training images for color range calculation.
-    *   Easily place and rename reference files into their correct project folders, with instant validation for the reference color checker.
-*   **Tkinter GUI & CLI:** A comprehensive Tkinter GUI allows for easy configuration of all analysis parameters. A full-featured Command-Line Interface (CLI) is also available for scripting and automation.
-*   **Archivable PDF Reporting:** Generate detailed PDF reports using ReportLab, summarizing the analysis results with statistics and visualizations. The entire pipeline state can be archived for later regeneration of reports.
-*   **Debug Mode:** A debug mode is available for verbose console output and detailed debug reports with intermediate pipeline steps and data.
+*   **Modular Analysis Pipeline**: Sequentially run color correction, geometric alignment, object alignment, masking, and color/symmetry analysis.
+*   **Extensible Project Management**: Each analysis is configured via a project-specific `project_config.json`.
+*   **Robust Color Correction**: Utilizes a tiered patch detection strategy (ArUco, OpenCV, YOLO) and robust color-matching for stable color correction.
+*   **Comprehensive Reporting**: Automatically generates detailed PDF and HTML reports with plots, metadata, and visual pipeline steps.
+*   **Full-Featured GUI**: A Tkinter-based GUI to manage projects, datasets, and run the entire analysis pipeline.
+*   **Report History & Regeneration**: A "History & Reports" tab in the GUI to scan, view, filter, and regenerate past analysis reports from archives.
+*   **Advanced Dataset Management**: Includes a "File Placer" to easily manage project assets and a training image manager with previews and delete functionality.
 
 ## Installation
 

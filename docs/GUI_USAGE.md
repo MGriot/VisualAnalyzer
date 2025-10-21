@@ -1,47 +1,89 @@
-# GUI Usage Guide
+# Visual Analyzer - GUI Usage Guide
 
-This document provides a detailed guide to using the Visual Analyzer's Graphical User Interface (GUI), launched by running `python -m src.gui`.
+This document provides a detailed walkthrough of all features available in the main Visual Analyzer GUI, which is the recommended way to interact with the tool.
+
+To launch the application, run:
+```bash
+# Make sure your virtual environment is active
+.venv\Scripts\activate.bat
+
+# Run the gui module (add --debug to see all options)
+python -m src.gui --debug
+```
 
 ## Main Tabs
 
-The GUI is organized into three main tabs:
+The GUI is organized into four main tabs:
 
-1.  **Run Analysis:** The primary interface for executing an analysis pipeline on an image.
-2.  **Create Project:** A simple tool to scaffold a new project directory.
-3.  **Manage Dataset:** Tools for preparing and configuring your project's data assets.
+1.  **Run Analysis**: The main screen for configuring and executing a single analysis run.
+2.  **History & Reports**: A powerful tool for viewing past analyses and regenerating reports.
+3.  **Create Project**: A simple utility to scaffold a new project directory.
+4.  **Manage Dataset**: Tools for managing project files and defining color sample points.
 
-## Run Analysis Tab
+---
 
-This is the main tab for running an analysis. The workflow is as follows:
+## 1. Run Analysis Tab
 
-1.  **Select Project:** Choose your project from the dropdown menu.
-2.  **Select Image:** Click to select the image file you want to analyze.
-3.  **Select Color Checker (Optional):** If your analysis image does not contain a color checker, you can provide a separate photo of a checker taken under the same lighting conditions.
-4.  **Configure Analysis (Debug Mode):** If you run the GUI with the `--debug` flag (`python -m src.gui --debug`), a detailed options panel becomes visible, allowing you to toggle every step of the pipeline (e.g., Color Alignment, Object Alignment, Masking) and configure their parameters.
-5.  **Run Analysis:** Click the "Run Analysis" button to start the pipeline.
+This is the primary tab for running the analysis pipeline on a single image.
 
-### Interactive Fallback: Manual Color Checker Alignment
+![Run Analysis Tab](placeholder.png) *<-- Placeholder for a screenshot of the analysis tab -->*
 
-A key feature of the pipeline is its robust fallback system. If you run a process that requires color correction (e.g., the main analysis pipeline) and the system **fails to automatically detect the color checker** using ArUco markers, a new GUI window will automatically open.
+### Configuration
 
--   **How it works:** The window will display the image of your color checker.
--   **Your action:** Click on the **four corners** of the color checker grid, starting with the **top-left** and proceeding clockwise.
--   Once you have selected four points, you can close the window.
--   The pipeline will automatically use these four points to perform a perspective alignment and continue the analysis.
+1.  **Project Name**: Select the project you are working on. The dropdown is populated from the folders in `data/projects/`.
+2.  **Select Image**: Click to choose the image file you want to analyze.
+3.  **Part Number & Thickness**: These fields are automatically filled by parsing the filename of the selected image. You can manually edit them to override the values for the analysis and report.
+4.  **Select Color Checker**: If using Color Alignment, you must select the image of the color checker taken under the same lighting conditions as your sample image.
 
-This ensures that the analysis can always proceed, even if automatic detection is not possible.
+### Analysis Steps & Options
 
-## Create Project Tab
+If you run the GUI in `--debug` mode, a comprehensive set of options appears, allowing you to enable or disable every step of the pipeline (e.g., Color Alignment, Masking, Symmetry Analysis) and configure their parameters.
 
-This tab provides a simple one-click utility to create a new project.
+### Running the Analysis
 
-1.  **Enter Project Name:** Type the desired name for your new project.
-2.  **Click Create:** The application will create a new folder in `data/projects/` with the standard sub-directory structure (`dataset`, `samples`, etc.) and generate the default configuration files and reference images (`project_config.json`, `default_color_checker_reference.png`, etc.).
+1.  Click **"Run Analysis"**.
+2.  A popup will confirm the analysis is starting.
+3.  Once the image processing is complete, a **"Save As..."** dialog will appear, allowing you to choose where to save the final PDF report.
+4.  If running in debug mode, you will then be asked if you want a "Normal" or full "Debug" report.
 
-## Manage Dataset Tab
+---
 
-This tab provides powerful tools to help you set up your project's data.
+## 2. History & Reports Tab
 
-1.  **Launch Point Selector:** This opens a GUI for interactively defining regions of interest on your training images. For each image in your project's `training_images` folder, you can click to place points. The coordinates of these points are saved to `dataset_item_processing_config.json` and are used to define the target color for analysis.
+This tab allows you to find, filter, and regenerate reports from all past analyses.
 
-2.  **Setup Project Files:** This opens the **File Placer**, a utility designed to streamline project setup. It reads your `project_config.json` and shows the status of all required files (e.g., Object Reference, Drawing Layers). For each missing file, you can click a button to open a file dialog, select the correct file from anywhere on your computer, and the tool will automatically copy and rename it to the correct location within your project.
+![History Tab](placeholder.png) *<-- Placeholder for a screenshot of the history tab -->*
+
+### Features
+
+1.  **Scan for Reports**: Click this button to scan the entire `output/` directory for analysis archives (`.gri` files). The table will be populated with the findings.
+2.  **Filterable Table**: The main view is a table showing key metadata from each analysis. You can filter the results in real-time by typing into the entry boxes at the top of each column.
+3.  **Sorting**: Click any column header to sort the results by that column.
+4.  **Report Regeneration**:
+    *   Select a single row in the table.
+    *   The **"Recreate Selected Report"** button will become active.
+    *   Click it, and a "Save As..." dialog will appear, allowing you to save a new copy of the PDF report.
+    *   If you are in debug mode, you can also choose to regenerate as a "Normal" or "Debug" report.
+
+---
+
+## 3. Create Project Tab
+
+This provides a simple form to create a new, empty project with the correct folder structure and default configuration files in the `data/projects/` directory.
+
+---
+
+## 4. Manage Dataset Tab
+
+This tab contains tools to help set up your project's assets.
+
+1.  **Launch Point Selector**: Opens a dedicated GUI for selecting specific points on your training images to define the target color space. This is an alternative to using the entire image for color calculation.
+2.  **Setup Project Files**: Opens the **Project File Placer** GUI.
+
+### Project File Placer Enhancements
+
+The File Placer helps you copy required files (like reference images and drawing layers) into the correct locations. It has been enhanced with a **Training Image Manager**:
+
+*   **Add Images**: Select one or more training images from anywhere on your computer to copy them into the project.
+*   **Preview**: See thumbnails of all training images currently in the project.
+*   **Delete**: A "Delete" button next to each image allows for easy removal.

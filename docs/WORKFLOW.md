@@ -77,6 +77,8 @@ This opens a dedicated GUI to select points on each training image. Your selecti
 
 Finally, you can run the main analysis pipeline using the Tkinter GUI (`python src/gui.py`) or the CLI (`src/main.py`).
 
+> **Note on Output Folders:** Each analysis run will save its output (debug images, charts, and the `.gri` archive) into a unique, self-contained folder. This folder will be created in `output/<project_name>/` and named using the format: `<timestamp>_<part-number>_<thickness>`.
+
 **Pipeline Order:**
 1.  Color Correction (`--color-alignment`)
 2.  Geometrical Alignment (`--alignment`)
