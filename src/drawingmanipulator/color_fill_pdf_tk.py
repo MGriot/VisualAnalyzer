@@ -108,21 +108,17 @@ class PageSegmentation:
 def segment_closed_regions(
     pil_img: Image.Image,
     dilation_radius: int = 2,
-    invert_lines: bool = False
-) -> PageSegmentation:
+    invert_lines: bool = False,
+    threshold: Optional[int] = None,
+) -> Tuple[PageSegmentation, int]:
     """
-    Segment connected non-line regions:
-      1) Convert to grayscale
-      2) Threshold to get lines (black) vs background (white)
-      3) Dilate lines to seal tiny gaps
-      4) Invert to get fillable (non-line) regions
-      5) Connected-components labeling on fillable areas
-    Returns label_map with labels in [0..num_labels], label 0 is lines/no-fill.
+    Segment connected non-line regions.
+    Returns PageSegmentation object and the threshold value used.
     """
     gray = to_uint8_grayscale(pil_img)
 
-    # Auto-threshold using Otsu; lines should be <= thresh
-    t = otsu_threshold(gray)
+    # Use provided threshold or auto-threshold using Otsu
+    t = otsu_threshold(gray) if threshold is None else threshold
 
     # If artwork is inverted (white lines on black background), allow inverting
     if invert_lines:
@@ -154,9 +150,10 @@ def segment_closed_regions(
     if 0 in border_labels:
         border_labels.remove(0)
 
-    return PageSegmentation(
+    segmentation = PageSegmentation(
         label_map=labeled.astype(np.int32), num_labels=num, border_labels=border_labels
     )
+    return segmentation, t
 
 
 # -------------------------
@@ -182,16 +179,20 @@ class ColorFillPDFApp(tk.Tk):
         self.segmentation: Optional[PageSegmentation] = None
         self.color_groups: list = []  # List of color group dicts
         self.active_color_group_id: Optional[str] = None
-        self.last_clicked_region: Optional[int] = None
 
         self.dilation_radius: int = 2
         self.invert_lines: bool = False
         self.zoom_level: float = 1.0
 
+        # UI-linked State Variables
+        self.highlights_visible = tk.BooleanVar(value=True)
+        self.manual_threshold = tk.IntVar(value=127)
+
         # UI
         self.region_tree: Optional[ttk.Treeview] = None
         self.canvas: Optional[tk.Canvas] = None
         self.status: Optional[tk.StringVar] = None
+        self.threshold_label: Optional[tk.Label] = None
         self._build_ui()
 
     # ---------- UI ----------
@@ -244,37 +245,25 @@ class ColorFillPDFApp(tk.Tk):
 
         # Toolbar
         toolbar = tk.Frame(self)
-        tk.Button(toolbar, text="Open PDF...", command=self.open_pdf).pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
-        tk.Button(toolbar, text="Pick Color", command=self.pick_color).pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
-        tk.Button(toolbar, text="Prev Page", command=self.prev_page).pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
-        tk.Button(toolbar, text="Next Page", command=self.next_page).pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
-        tk.Button(toolbar, text="Clear Fills", command=self.clear_fills).pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
-        tk.Button(toolbar, text="Zoom In", command=self._zoom_in).pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
-        tk.Button(toolbar, text="Zoom Out", command=self._zoom_out).pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
+        tk.Button(toolbar, text="Open PDF...", command=self.open_pdf).pack(side=tk.LEFT, padx=2, pady=4)
+        tk.Button(toolbar, text="Pick Color", command=self.pick_color).pack(side=tk.LEFT, padx=2, pady=4)
+        tk.Button(toolbar, text="Prev Page", command=self.prev_page).pack(side=tk.LEFT, padx=2, pady=4)
+        tk.Button(toolbar, text="Next Page", command=self.next_page).pack(side=tk.LEFT, padx=2, pady=4)
+        tk.Button(toolbar, text="Clear Fills", command=self.clear_fills).pack(side=tk.LEFT, padx=2, pady=4)
+        tk.Button(toolbar, text="Zoom In", command=self._zoom_in).pack(side=tk.LEFT, padx=2, pady=4)
+        tk.Button(toolbar, text="Zoom Out", command=self._zoom_out).pack(side=tk.LEFT, padx=2, pady=4)
+        tk.Checkbutton(toolbar, text="Show Color Fills", variable=self.highlights_visible, command=self._refresh_display).pack(side=tk.LEFT, padx=2, pady=4)
         toolbar.pack(fill=tk.X)
 
         # Main content area with PanedWindow
         main_pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
         main_pane.pack(fill=tk.BOTH, expand=True)
 
-        # Left Pane: Region List & Controls
+        # Left Pane: Controls
         left_pane = tk.Frame(main_pane, width=300)
         left_pane.pack_propagate(False)
 
+        # -- Color Groups --
         group_frame = tk.LabelFrame(left_pane, text="Color Groups")
         group_frame.pack(fill=tk.X, padx=5, pady=5)
 
@@ -285,7 +274,7 @@ class ColorFillPDFApp(tk.Tk):
         tk.Button(btn_frame, text="Delete", command=self._delete_selected_group).pack(side=tk.LEFT, expand=True, fill=tk.X)
 
         tree_container = tk.Frame(left_pane)
-        tree_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
 
         self.region_tree = ttk.Treeview(tree_container, columns=("color",), show="tree headings", selectmode="extended")
         self.region_tree.heading("#0", text="Region Name / ID")
@@ -301,14 +290,27 @@ class ColorFillPDFApp(tk.Tk):
 
         self.region_tree.bind("<<TreeviewSelect>>", self._on_region_select)
         
-        tk.Button(left_pane, text="Remove Selected Region from Group", command=self._remove_selected_region).pack(fill=tk.X, padx=5, pady=5)
+        tk.Button(left_pane, text="Remove Selected Region(s)", command=self._remove_selected_region).pack(fill=tk.X, padx=5, pady=5)
+
+        # -- Segmentation Settings --
+        seg_frame = tk.LabelFrame(left_pane, text="Segmentation")
+        seg_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.threshold_label = tk.Label(seg_frame, text="Threshold: 127 (Auto)")
+        self.threshold_label.pack()
+
+        threshold_slider = tk.Scale(seg_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=self.manual_threshold, command=self._on_slider_move)
+        threshold_slider.pack(fill=tk.X, padx=5)
+
+        seg_btn_frame = tk.Frame(seg_frame)
+        seg_btn_frame.pack(fill=tk.X)
+        tk.Button(seg_btn_frame, text="Apply Manual", command=lambda: self._resegment_page(manual=True)).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        tk.Button(seg_btn_frame, text="Reset to Auto", command=lambda: self._resegment_page(manual=False)).pack(side=tk.LEFT, expand=True, fill=tk.X)
 
         main_pane.add(left_pane, minsize=250)
 
         # Right Pane: Canvas
-        self.canvas = tk.Canvas(
-            main_pane, bg="#444444", highlightthickness=0, cursor="tcross"
-        )
+        self.canvas = tk.Canvas(main_pane, bg="#444444", highlightthickness=0, cursor="tcross")
         self.canvas.bind("<Button-1>", self.on_canvas_click)
         self.canvas.bind("<Configure>", self.on_canvas_resize)
         self.canvas.bind("<Control-Button-4>", self._on_mouse_wheel) # Linux/Windows scroll up
@@ -325,27 +327,20 @@ class ColorFillPDFApp(tk.Tk):
         status_bar = tk.Label(self, textvariable=self.status, anchor="w")
         status_bar.pack(fill=tk.X)
 
-        self.geometry("1200x800")
+        self.geometry("1200x900")
 
     def _add_new_group(self):
         name = tk.simpledialog.askstring("New Color Group", "Enter a name for the new group:", parent=self)
-        if not name:
-            return
+        if not name: return
 
         color_info = colorchooser.askcolor(title=f"Pick color for '{name}'")
-        if not color_info or not color_info[0]:
-            return
+        if not color_info or not color_info[0]: return
         
         r, g, b = color_info[0]
         rgba = (int(r), int(g), int(b), 150)
 
         group_id = f"group_{time.time()}" 
-        new_group = {
-            "id": group_id,
-            "name": name,
-            "color": rgba,
-            "regions": set()
-        }
+        new_group = {"id": group_id, "name": name, "color": rgba, "regions": set()}
         self.color_groups.append(new_group)
         self._update_region_list()
         self.region_tree.selection_set(group_id)
@@ -353,8 +348,8 @@ class ColorFillPDFApp(tk.Tk):
     def _rename_selected_group(self):
         if not self.region_tree: return
         selection = self.region_tree.selection()
-        if not selection or not selection[0].startswith("group_"):
-            messagebox.showwarning("Warning", "Please select a single group folder to rename.")
+        if len(selection) != 1 or not selection[0].startswith("group_"):
+            messagebox.showwarning("Warning", "Please select exactly one group folder to rename.")
             return
         
         group_id = selection[0]
@@ -369,16 +364,14 @@ class ColorFillPDFApp(tk.Tk):
     def _delete_selected_group(self):
         if not self.region_tree: return
         selection = self.region_tree.selection()
-        if not selection:
-            messagebox.showwarning("Warning", "Please select a group folder to delete.")
-            return
+        if not selection: return
 
         group_ids_to_delete = {item for item in selection if item.startswith("group_")}
         if not group_ids_to_delete:
-            messagebox.showwarning("Warning", "No group selected to delete.")
+            messagebox.showwarning("Warning", "No group selected to delete. Select a group folder.")
             return
 
-        if not messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete {len(group_ids_to_delete)} selected group(s) and all their regions?"):
+        if not messagebox.askyesno("Confirm Delete", f"Delete {len(group_ids_to_delete)} selected group(s) and all their regions?"):
             return
 
         self.color_groups = [g for g in self.color_groups if g['id'] not in group_ids_to_delete]
@@ -391,9 +384,7 @@ class ColorFillPDFApp(tk.Tk):
     def _remove_selected_region(self):
         if not self.region_tree: return
         selection = self.region_tree.selection()
-        if not selection:
-            messagebox.showwarning("Warning", "Please select a region (Area) to remove.")
-            return
+        if not selection: return
 
         regions_to_remove = {item for item in selection if item.startswith("region_")}
         if not regions_to_remove:
@@ -411,7 +402,7 @@ class ColorFillPDFApp(tk.Tk):
         self._redraw_all_overlays()
         self._refresh_display()
         self._update_region_list()
-        self.status.set(f"Removed {len(regions_to_remove)} region(s) from their groups.")
+        self.status.set(f"Removed {len(regions_to_remove)} region(s).")
 
     def _zoom_in(self):
         self.zoom_level *= 1.25
@@ -437,14 +428,11 @@ class ColorFillPDFApp(tk.Tk):
     def _on_drag_motion(self, event):
         self.canvas.scan_dragto(event.x, event.y, gain=1)
 
-    # ---------- PDF Loading & Rendering ----------
+    # ---------- PDF & Segmentation ----------
 
     def open_pdf(self):
-        path = filedialog.askopenfilename(
-            title="Open PDF", filetypes=[("PDF files", "*.pdf")]
-        )
-        if not path:
-            return
+        path = filedialog.askopenfilename(title="Open PDF", filetypes=[("PDF files", "*.pdf")])
+        if not path: return
         try:
             self.pdf_doc = fitz.open(path)
         except Exception as e:
@@ -456,36 +444,41 @@ class ColorFillPDFApp(tk.Tk):
         self.status.set(f"Loaded: {os.path.basename(path)} | Pages: {self.page_count}")
         self._load_page(self.page_index)
 
-    def _load_page(self, index: int):
-        if not self.pdf_doc or not (0 <= index < self.pdf_doc.page_count):
-            return
+    def _load_page(self, index: int, threshold: Optional[int] = None):
+        if not self.pdf_doc or not (0 <= index < self.pdf_doc.page_count): return
 
         page = self.pdf_doc.load_page(index)
         mat = fitz.Matrix(2.0, 2.0)
         pix = page.get_pixmap(matrix=mat, alpha=False)
-        pil = pil_from_pixmap(pix).convert("RGB")
-
-        self.base_image = pil
-        self.overlay_image = Image.new("RGBA", self.base_image.size, (0, 0, 0, 0))
+        self.base_image = pil_from_pixmap(pix).convert("RGB")
+        
         self.color_groups.clear()
-        self.last_clicked_region = None
         self.active_color_group_id = None
         self._update_region_list()
 
-        self.status.set("Segmenting regions... (this may take a moment)")
+        self.status.set("Segmenting regions...")
         self.update_idletasks()
-        self.segmentation = segment_closed_regions(
-            self.base_image,
-            dilation_radius=self.dilation_radius,
-            invert_lines=self.invert_lines,
+        
+        self.segmentation, used_threshold = segment_closed_regions(
+            self.base_image, self.dilation_radius, self.invert_lines, threshold
         )
+        self.manual_threshold.set(used_threshold)
+        mode = "(Auto)" if threshold is None else "(Manual)"
+        self.threshold_label.config(text=f"Threshold: {used_threshold} {mode}")
 
         num_regions = self.segmentation.num_labels
-        self.status.set(
-            f"Page {self.page_index + 1}/{self.page_count} | Regions detected: {num_regions} "
-            f"(border regions are not fillable)"
-        )
+        self.status.set(f"Page {self.page_index + 1}/{self.page_count} | Regions: {num_regions} | Threshold: {used_threshold} {mode}")
+        
+        self._redraw_all_overlays()
         self._refresh_display()
+
+    def _resegment_page(self, manual: bool):
+        if self.base_image is None: return
+        if not messagebox.askyesno("Confirm Resegment", "This will clear all colored regions on the current page. Proceed?"):
+            return
+        
+        threshold = self.manual_threshold.get() if manual else None
+        self._load_page(self.page_index, threshold=threshold)
 
     def prev_page(self):
         if self.pdf_doc and self.page_index > 0:
@@ -499,11 +492,44 @@ class ColorFillPDFApp(tk.Tk):
 
     # ---------- Display handling ----------
 
-    def _refresh_display(self):
-        if self.base_image is None:
-            return
+    def _generate_segmentation_preview(self):
+        if self.segmentation is None:
+            return self.base_image.convert("RGBA")
+
+        # Use a morphological gradient to find the boundaries between labeled regions
+        label_map = self.segmentation.label_map
+        structure = ndi.generate_binary_structure(2, 1)
+        eroded = ndi.grey_erosion(label_map, footprint=structure)
+        dilated = ndi.grey_dilation(label_map, footprint=structure)
         
-        comp = alpha_composite(self.base_image.convert("RGBA"), self.overlay_image)
+        # Boundaries are where the dilated and eroded maps differ
+        boundaries = (dilated != eroded) & (label_map > 0) # Exclude boundaries of the background
+        
+        # Create a PIL mask for the boundaries
+        boundary_mask_pil = pil_mask_from_bool(boundaries)
+
+        # Start with the base image
+        preview_img = self.base_image.convert("RGBA")
+        
+        # Create a bright magenta overlay for the boundaries
+        boundary_overlay = Image.new("RGBA", preview_img.size, (255, 0, 255, 200))
+        
+        # Paste the boundaries onto the preview image
+        preview_img.paste(boundary_overlay, (0, 0), boundary_mask_pil)
+        
+        return preview_img
+
+    def _refresh_display(self, *_):
+        if self.base_image is None: return
+        
+        if self.highlights_visible.get():
+            # Show base image + colored fills
+            base_rgba = self.base_image.convert("RGBA")
+            comp = alpha_composite(base_rgba, self.overlay_image)
+        else:
+            # Show segmentation preview (base image + all region borders)
+            comp = self._generate_segmentation_preview()
+
         self.composited_display = comp
 
         iw, ih = comp.size
@@ -523,8 +549,7 @@ class ColorFillPDFApp(tk.Tk):
     # ---------- Interaction ----------
 
     def _update_region_list(self):
-        if not self.region_tree:
-            return
+        if not self.region_tree: return
         
         selection = self.region_tree.selection()
         
@@ -533,24 +558,17 @@ class ColorFillPDFApp(tk.Tk):
             
         for group in sorted(self.color_groups, key=lambda g: g['name']):
             color_hex = f"#{group['color'][0]:02x}{group['color'][1]:02x}{group['color'][2]:02x}"
-            group_node = self.region_tree.insert(
-                "", "end", iid=group['id'], text=group['name'], values=(color_hex,)
-            )
+            group_node = self.region_tree.insert("", "end", iid=group['id'], text=group['name'], values=(color_hex,))
             for region_id in sorted(list(group['regions'])):
                 self.region_tree.insert(group_node, "end", text=f"  Area {region_id}", iid=f"region_{region_id}")
         
         if selection:
-            try:
-                self.region_tree.selection_set(selection)
-            except tk.TclError:
-                # This can happen if the selected item was deleted
-                pass
+            try: self.region_tree.selection_set(selection)
+            except tk.TclError: pass # Item might have been deleted
 
     def _on_region_select(self, event):
         selection = self.region_tree.selection()
-        if not selection:
-            self.active_color_group_id = None
-            return
+        if not selection: self.active_color_group_id = None; return
         
         last_selected_id = selection[-1]
         if last_selected_id.startswith("group_"):
@@ -558,25 +576,23 @@ class ColorFillPDFApp(tk.Tk):
             self.status.set(f"Active group: '{self.region_tree.item(last_selected_id, 'text')}'. Click to add regions.")
         elif last_selected_id.startswith("region_"):
             parent_id = self.region_tree.parent(last_selected_id)
-            if parent_id:
-                self.active_color_group_id = parent_id
+            if parent_id: self.active_color_group_id = parent_id
             self.status.set(f"{len(selection)} region(s) selected.")
 
+    def _on_slider_move(self, val_str):
+        val = int(val_str)
+        self.threshold_label.config(text=f"Threshold: {val} (Manual)")
+
     def pick_color(self):
-        messagebox.showinfo("Info", "To set a color, create a 'New Group' and choose its color, or select an existing group to make it active.")
+        messagebox.showinfo("Info", "Create a 'New Group' to pick a color, or select an existing group to make it active.")
 
     def on_canvas_click(self, event):
-        if self.base_image is None or self.segmentation is None:
-            return
+        if self.base_image is None or self.segmentation is None: return
 
-        canvas_x = self.canvas.canvasx(event.x)
-        canvas_y = self.canvas.canvasy(event.y)
+        canvas_x, canvas_y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        x, y = int(canvas_x / self.zoom_level), int(canvas_y / self.zoom_level)
 
-        x = int(canvas_x / self.zoom_level)
-        y = int(canvas_y / self.zoom_level)
-
-        if not (0 <= x < self.base_image.width and 0 <= y < self.base_image.height):
-            return
+        if not (0 <= x < self.base_image.width and 0 <= y < self.base_image.height): return
 
         label = int(self.segmentation.label_map[y, x])
         if label == 0 or label in self.segmentation.border_labels:
@@ -584,18 +600,14 @@ class ColorFillPDFApp(tk.Tk):
             return
 
         if not self.active_color_group_id:
-            messagebox.showwarning("No Active Group", "Please select a color group from the list on the left before adding a region.")
+            messagebox.showwarning("No Active Group", "Please select a color group from the list before adding a region.")
             return
             
         active_group = next((g for g in self.color_groups if g['id'] == self.active_color_group_id), None)
-        if not active_group:
-            messagebox.showerror("Error", "Active color group not found. Please re-select it.")
-            return
+        if not active_group: messagebox.showerror("Error", "Active group not found. Please re-select."); return
 
-        # Remove region from any other group before adding to the new one
-        for group in self.color_groups:
-            if label in group['regions']:
-                group['regions'].remove(label)
+        for group in self.color_groups: # Remove from any other group first
+            if label in group['regions']: group['regions'].remove(label)
         
         active_group['regions'].add(label)
         
@@ -604,40 +616,28 @@ class ColorFillPDFApp(tk.Tk):
         self._update_region_list()
         self.status.set(f"Added Region {label} to group '{active_group['name']}'.")
 
-    def _apply_overlay_for_region(
-        self, region_id: int, rgba: Tuple[int, int, int, int]
-    ):
-        if self.segmentation is None or self.overlay_image is None:
-            return
+    def _apply_overlay_for_region(self, region_id: int, rgba: Tuple[int, int, int, int]):
+        if self.segmentation is None or self.overlay_image is None: return
         mask_bool = numpy_mask_from_label(self.segmentation.label_map, region_id)
         mask_L = pil_mask_from_bool(mask_bool)
         color_img = Image.new("RGBA", self.overlay_image.size, rgba)
         self.overlay_image.paste(color_img, (0, 0), mask_L)
 
         center_y, center_x = ndi.center_of_mass(mask_bool)
-        if math.isnan(center_y) or math.isnan(center_x):
-            return
+        if math.isnan(center_y) or math.isnan(center_x): return
 
         brightness = (rgba[0] * 299 + rgba[1] * 587 + rgba[2] * 114) / 1000
         text_color = (0, 0, 0, 255) if brightness > 128 else (255, 255, 255, 255)
 
         draw = ImageDraw.Draw(self.overlay_image)
-        try:
-            font = ImageFont.truetype("arial.ttf", 24)
-        except IOError:
-            font = ImageFont.load_default()
+        try: font = ImageFont.truetype("arial.ttf", 24)
+        except IOError: font = ImageFont.load_default()
         
         text = str(region_id)
         text_bbox = draw.textbbox((0, 0), text, font=font)
-        text_w = text_bbox[2] - text_bbox[0]
-        text_h = text_bbox[3] - text_bbox[1]
+        text_w, text_h = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
         
-        draw.text(
-            (center_x - text_w / 2, center_y - text_h / 2),
-            text,
-            font=font,
-            fill=text_color
-        )
+        draw.text((center_x - text_w / 2, center_y - text_h / 2), text, font=font, fill=text_color)
 
     def _redraw_all_overlays(self):
         if self.base_image is None: return
@@ -647,32 +647,30 @@ class ColorFillPDFApp(tk.Tk):
                 self._apply_overlay_for_region(region_id, group['color'])
 
     def clear_fills(self):
-        if self.base_image is None:
-            return
+        if self.base_image is None: return
         self.color_groups.clear()
-        self.overlay_image = Image.new("RGBA", self.base_image.size, (0, 0, 0, 0))
+        self._redraw_all_overlays()
         self._refresh_display()
         self._update_region_list()
         self.status.set("Cleared all fills and groups.")
 
     def set_dilation(self):
-        val_str = simpledialog.askstring("Set Line Dilation", "Dilation radius (integer, 0-10):", initialvalue=str(self.dilation_radius))
+        val_str = simpledialog.askstring("Set Line Dilation", "Dilation radius (0-10):", initialvalue=str(self.dilation_radius))
         if val_str is None: return
         try:
             val = int(val_str)
             if not (0 <= val <= 10): raise ValueError
             self.dilation_radius = val
-            if self.base_image is not None:
-                self._load_page(self.page_index)
+            self._resegment_page(manual=False) # Resegment with new dilation
         except (ValueError, TypeError):
             messagebox.showerror("Error", "Invalid input. Please enter an integer between 0 and 10.")
 
     def toggle_invert_lines(self):
         self.invert_lines = not self.invert_lines
         status_msg = "ON" if self.invert_lines else "OFF"
-        self.status.set(f"Invert lines (white-on-black) is now {status_msg}.")
+        self.status.set(f"Invert lines is now {status_msg}.")
         if self.base_image is not None:
-            self._load_page(self.page_index)
+            self._resegment_page(manual=False) # Resegment with inverted lines
 
     # ---------- Export ----------
 
@@ -704,7 +702,7 @@ class ColorFillPDFApp(tk.Tk):
 
         regions_to_export = self._get_selected_regions_for_export()
         if not regions_to_export:
-            messagebox.showinfo("Info", "No regions are selected for export. Select items from the list on the left.")
+            messagebox.showinfo("Info", "No regions are selected. Select items from the list on the left.")
             return
 
         export_img = Image.new("RGBA", self.base_image.size, (0, 0, 0, 0))
@@ -716,22 +714,19 @@ class ColorFillPDFApp(tk.Tk):
             export_img.paste(color_img, (0, 0), mask_L)
 
         path = filedialog.asksaveasfilename(
-            title="Save Selected Regions as PNG",
-            defaultextension=".png",
+            title="Save Selected Regions as PNG",defaultextension=".png",
             filetypes=[("PNG image", "*.png")],
-            initialfile=f"page{self.page_index+1:02d}_selected_regions.png",
+            initialfile=f"page{self.page_index+1:02d}_selected.png",
         )
         if not path: return
         try:
             export_img.save(path, format="PNG")
-            self.status.set(f"Saved {len(regions_to_export)} selected regions to {os.path.basename(path)}")
+            self.status.set(f"Saved {len(regions_to_export)} regions to {os.path.basename(path)}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save PNG:\n{e}")
 
     def export_all_regions_pngs(self):
-        if self.base_image is None or not self.color_groups:
-            messagebox.showinfo("Info", "No colored regions to export.")
-            return
+        if self.base_image is None or not self.color_groups: messagebox.showinfo("Info", "No regions to export."); return
         outdir = filedialog.askdirectory(title="Select output directory for PNGs")
         if not outdir: return
         
@@ -754,14 +749,11 @@ class ColorFillPDFApp(tk.Tk):
             messagebox.showerror("Error", f"Failed to export region PNGs:\n{e}")
 
     def export_composite_png(self):
-        if self.composited_display is None:
-            messagebox.showinfo("Info", "Nothing to export.")
-            return
+        if self.composited_display is None: messagebox.showinfo("Info", "Nothing to export."); return
         
         full_comp = alpha_composite(self.base_image.convert("RGBA"), self.overlay_image)
         path = filedialog.asksaveasfilename(
-            title="Save composited PNG",
-            defaultextension=".png",
+            title="Save composited PNG",defaultextension=".png",
             filetypes=[("PNG image", "*.png")],
             initialfile=f"page{self.page_index+1:02d}_composite.png"
         )
@@ -777,11 +769,11 @@ class ColorFillPDFApp(tk.Tk):
 
         selection = self.region_tree.selection()
         if len(selection) != 1 or not selection[0].startswith("region_"):
-            messagebox.showwarning("Invalid Selection", "Please select exactly one region (Area) from the list to export as a PDF.")
+            messagebox.showwarning("Invalid Selection", "Please select exactly one region (Area) to export as PDF.")
             return
 
         regions_to_export = self._get_selected_regions_for_export()
-        if not regions_to_export: return # Should not happen due to check above
+        if not regions_to_export: return
 
         region_id, rgba = list(regions_to_export)[0]
 
@@ -796,8 +788,7 @@ class ColorFillPDFApp(tk.Tk):
         png_bytes = png_bytes.getvalue()
 
         path = filedialog.asksaveasfilename(
-            title="Save region as PDF",
-            defaultextension=".pdf",
+            title="Save region as PDF",defaultextension=".pdf",
             filetypes=[("PDF", "*.pdf")],
             initialfile=f"page{self.page_index+1:02d}_region_{region_id}.pdf"
         )
@@ -811,7 +802,7 @@ class ColorFillPDFApp(tk.Tk):
             page.insert_image(rect, stream=png_bytes, keep_proportion=False)
             doc.save(path)
             doc.close()
-            self.status.set(f"Saved current region PDF to {os.path.basename(path)}")
+            self.status.set(f"Saved region PDF to {os.path.basename(path)}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save PDF:\n{e}")
 
