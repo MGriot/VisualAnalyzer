@@ -67,6 +67,7 @@ class ProjectConfig(BaseModel):
     """
     training_path: str
     object_reference_path: Optional[str] = None
+    logo_path: Optional[str] = None
     
     color_correction: ColorCorrectionConfig
     geometrical_alignment: GeometricalAlignmentConfig = Field(default_factory=GeometricalAlignmentConfig)

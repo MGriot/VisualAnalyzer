@@ -1,0 +1,824 @@
+import io
+import os
+import sys
+import time
+import math
+import tkinter as tk
+from tkinter import ttk, filedialog, colorchooser, messagebox, simpledialog
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple, Set
+
+import fitz  # PyMuPDF
+import numpy as np
+from PIL import Image, ImageTk, ImageOps, ImageDraw, ImageFont
+from scipy import ndimage as ndi
+
+
+# -------------------------
+# Utility functions
+# -------------------------
+
+
+def pil_from_pixmap(pix: fitz.Pixmap) -> Image.Image:
+    """Convert PyMuPDF Pixmap to PIL Image with alpha if present."""
+    if pix.alpha:  # retain transparency if any
+        mode = "RGBA"
+        data = pix.samples
+    else:
+        mode = "RGB"
+        data = pix.samples
+    img = Image.frombytes(mode, (pix.width, pix.height), bytes(data))
+    return img
+
+
+def otsu_threshold(gray_u8: np.ndarray) -> int:
+    """Compute Otsu threshold for a uint8 grayscale image. Returns integer threshold [0..255]."""
+    hist, bin_edges = np.histogram(gray_u8.flatten(), bins=256, range=(0, 255))
+    total = gray_u8.size
+    sum_total = np.dot(np.arange(256), hist)
+
+    sumB = 0.0
+    wB = 0.0
+    var_max = -1.0
+    threshold = 127  # fallback
+
+    for t in range(256):
+        wB += hist[t]
+        if wB == 0:
+            continue
+        wF = total - wB
+        if wF == 0:
+            break
+        sumB += t * hist[t]
+        mB = sumB / wB
+        mF = (sum_total - sumB) / wF
+        # Between class variance
+        var_between = wB * wF * (mB - mF) ** 2
+        if var_between > var_max:
+            var_max = var_between
+            threshold = t
+    return threshold
+
+
+def to_uint8_grayscale(pil_img: Image.Image) -> np.ndarray:
+    """Convert PIL image to uint8 grayscale numpy array [H, W]."""
+    gray = pil_img.convert("L")
+    return np.array(gray, dtype=np.uint8)
+
+def alpha_composite(base_rgba: Image.Image, overlay_rgba: Image.Image) -> Image.Image:
+    """Alpha-composite two RGBA PIL images."""
+    # Ensure same size
+    if base_rgba.size != overlay_rgba.size:
+        overlay_rgba = overlay_rgba.resize(base_rgba.size, Image.NEAREST)
+    out = base_rgba.copy()
+    out.alpha_composite(overlay_rgba)
+    return out
+
+def color_tuple_to_rgba(
+    color_tuple: Tuple[int, int, int],
+    alpha: int = 150
+) -> Tuple[int, int, int, int]:
+    r, g, b = color_tuple
+    return (int(r), int(g), int(b), int(alpha))
+
+def numpy_mask_from_label(label_map: np.ndarray, label_id: int) -> np.ndarray:
+    """Return boolean mask where label_map == label_id."""
+    return label_map == label_id
+
+def pil_mask_from_bool(mask: np.ndarray) -> Image.Image:
+    """Convert boolean mask to single-channel 'L' PIL image (0/255)."""
+    return Image.fromarray((mask.astype(np.uint8)) * 255, mode="L")
+
+def safe_make_dir(path: str):
+    os.makedirs(path, exist_ok=True)
+
+
+@dataclass
+class PageSegmentation:
+    label_map: np.ndarray  # int32 [H, W] region labels (0..N); 0 means no-region (edge)
+    num_labels: int
+    border_labels: Set[int]  # labels touching borders (usually outside "background" regions)
+
+
+# -------------------------
+# Segmentation
+# -------------------------
+
+
+def segment_closed_regions(
+    pil_img: Image.Image,
+    dilation_radius: int = 2,
+    invert_lines: bool = False
+) -> PageSegmentation:
+    """
+    Segment connected non-line regions:
+      1) Convert to grayscale
+      2) Threshold to get lines (black) vs background (white)
+      3) Dilate lines to seal tiny gaps
+      4) Invert to get fillable (non-line) regions
+      5) Connected-components labeling on fillable areas
+    Returns label_map with labels in [0..num_labels], label 0 is lines/no-fill.
+    """
+    gray = to_uint8_grayscale(pil_img)
+
+    # Auto-threshold using Otsu; lines should be <= thresh
+    t = otsu_threshold(gray)
+
+    # If artwork is inverted (white lines on black background), allow inverting
+    if invert_lines:
+        line_mask = gray >= t
+    else:
+        line_mask = gray <= t
+
+    # Seal gaps by dilating lines (morphological dilation)
+    if dilation_radius > 0:
+        structure = ndi.generate_binary_structure(2, 2)  # 8-connectivity
+        line_mask = ndi.binary_dilation(
+            line_mask, structure=structure, iterations=dilation_radius
+        )
+
+    # Fillable areas are where NOT line
+    fillable = ~line_mask
+
+    # Label connected components in fillable mask
+    structure = np.array([[1, 1, 1], [1, 1, 1], [1, 1, 1]], dtype=bool)  # 8-connected
+    labeled, num = ndi.label(fillable, structure=structure)
+
+    # Identify border-touching labels (usually outside background)
+    h, w = labeled.shape
+    border = np.concatenate(
+        [labeled[0, :], labeled[-1, :], labeled[:, 0], labeled[:, -1]]
+    )
+    border_labels = set(np.unique(border))
+    # Label 0 is non-fillable (lines)
+    if 0 in border_labels:
+        border_labels.remove(0)
+
+    return PageSegmentation(
+        label_map=labeled.astype(np.int32), num_labels=num, border_labels=border_labels
+    )
+
+
+# -------------------------
+# Tkinter Application
+# -------------------------
+
+
+class ColorFillPDFApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("PDF Region Color Filler (Tkinter)")
+
+        # State
+        self.pdf_doc: Optional[fitz.Document] = None
+        self.page_index: int = 0
+        self.page_count: int = 0
+
+        self.base_image: Optional[Image.Image] = None  # PIL RGB
+        self.overlay_image: Optional[Image.Image] = None  # PIL RGBA
+        self.composited_display: Optional[Image.Image] = None  # PIL Image for display
+        self.tk_img: Optional[ImageTk.PhotoImage] = None
+
+        self.segmentation: Optional[PageSegmentation] = None
+        self.color_groups: list = []  # List of color group dicts
+        self.active_color_group_id: Optional[str] = None
+        self.last_clicked_region: Optional[int] = None
+
+        self.dilation_radius: int = 2
+        self.invert_lines: bool = False
+        self.zoom_level: float = 1.0
+
+        # UI
+        self.region_tree: Optional[ttk.Treeview] = None
+        self.canvas: Optional[tk.Canvas] = None
+        self.status: Optional[tk.StringVar] = None
+        self._build_ui()
+
+    # ---------- UI ----------
+
+    def _build_ui(self):
+        # Menu bar
+        menubar = tk.Menu(self)
+
+        filemenu = tk.Menu(menubar, tearoff=0)
+        filemenu.add_command(label="Open PDF...", command=self.open_pdf)
+        filemenu.add_separator()
+        filemenu.add_command(
+            label="Export Selected Region(s) as PNG...",
+            command=self.export_selected_regions_png,
+        )
+        filemenu.add_command(
+            label="Export ALL colored regions as PNGs...",
+            command=self.export_all_regions_pngs,
+        )
+        filemenu.add_command(
+            label="Export composited PNG...", command=self.export_composite_png
+        )
+        filemenu.add_command(
+            label="Export current region as PDF...",
+            command=self.export_current_region_pdf,
+        )
+        filemenu.add_separator()
+        filemenu.add_command(label="Exit", command=self.quit)
+        menubar.add_cascade(label="File", menu=filemenu)
+
+        editmenu = tk.Menu(menubar, tearoff=0)
+        editmenu.add_command(label="Pick Color...", command=self.pick_color)
+        editmenu.add_command(label="Clear all fills", command=self.clear_fills)
+        menubar.add_cascade(label="Edit", menu=editmenu)
+
+        pagemenu = tk.Menu(menubar, tearoff=0)
+        pagemenu.add_command(label="Previous Page", command=self.prev_page)
+        pagemenu.add_command(label="Next Page", command=self.next_page)
+        menubar.add_cascade(label="Page", menu=pagemenu)
+
+        options = tk.Menu(menubar, tearoff=0)
+        options.add_command(label="Set line dilation...", command=self.set_dilation)
+        options.add_command(
+            label="Toggle invert lines (white-on-black)",
+            command=self.toggle_invert_lines,
+        )
+        menubar.add_cascade(label="Options", menu=options)
+
+        self.config(menu=menubar)
+
+        # Toolbar
+        toolbar = tk.Frame(self)
+        tk.Button(toolbar, text="Open PDF...", command=self.open_pdf).pack(
+            side=tk.LEFT, padx=4, pady=4
+        )
+        tk.Button(toolbar, text="Pick Color", command=self.pick_color).pack(
+            side=tk.LEFT, padx=4, pady=4
+        )
+        tk.Button(toolbar, text="Prev Page", command=self.prev_page).pack(
+            side=tk.LEFT, padx=4, pady=4
+        )
+        tk.Button(toolbar, text="Next Page", command=self.next_page).pack(
+            side=tk.LEFT, padx=4, pady=4
+        )
+        tk.Button(toolbar, text="Clear Fills", command=self.clear_fills).pack(
+            side=tk.LEFT, padx=4, pady=4
+        )
+        tk.Button(toolbar, text="Zoom In", command=self._zoom_in).pack(
+            side=tk.LEFT, padx=4, pady=4
+        )
+        tk.Button(toolbar, text="Zoom Out", command=self._zoom_out).pack(
+            side=tk.LEFT, padx=4, pady=4
+        )
+        toolbar.pack(fill=tk.X)
+
+        # Main content area with PanedWindow
+        main_pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
+        main_pane.pack(fill=tk.BOTH, expand=True)
+
+        # Left Pane: Region List & Controls
+        left_pane = tk.Frame(main_pane, width=300)
+        left_pane.pack_propagate(False)
+
+        group_frame = tk.LabelFrame(left_pane, text="Color Groups")
+        group_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        btn_frame = tk.Frame(group_frame)
+        btn_frame.pack(fill=tk.X)
+        tk.Button(btn_frame, text="New", command=self._add_new_group).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        tk.Button(btn_frame, text="Rename", command=self._rename_selected_group).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        tk.Button(btn_frame, text="Delete", command=self._delete_selected_group).pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        tree_container = tk.Frame(left_pane)
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.region_tree = ttk.Treeview(tree_container, columns=("color",), show="tree headings", selectmode="extended")
+        self.region_tree.heading("#0", text="Region Name / ID")
+        self.region_tree.heading("color", text="Color")
+        self.region_tree.column("#0", width=150, anchor="w")
+        self.region_tree.column("color", width=70, anchor="w")
+
+        tree_scroll = ttk.Scrollbar(tree_container, orient="vertical", command=self.region_tree.yview)
+        self.region_tree.configure(yscrollcommand=tree_scroll.set)
+
+        self.region_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.region_tree.bind("<<TreeviewSelect>>", self._on_region_select)
+        
+        tk.Button(left_pane, text="Remove Selected Region from Group", command=self._remove_selected_region).pack(fill=tk.X, padx=5, pady=5)
+
+        main_pane.add(left_pane, minsize=250)
+
+        # Right Pane: Canvas
+        self.canvas = tk.Canvas(
+            main_pane, bg="#444444", highlightthickness=0, cursor="tcross"
+        )
+        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.bind("<Configure>", self.on_canvas_resize)
+        self.canvas.bind("<Control-Button-4>", self._on_mouse_wheel) # Linux/Windows scroll up
+        self.canvas.bind("<Control-Button-5>", self._on_mouse_wheel) # Linux/Windows scroll down
+        self.canvas.bind("<Control-MouseWheel>", self._on_mouse_wheel) # Windows/macOS scroll
+        self.canvas.bind("<ButtonPress-2>", self._on_drag_start) # Middle mouse button
+        self.canvas.bind("<B2-Motion>", self._on_drag_motion)
+        main_pane.add(self.canvas, minsize=400)
+        
+        main_pane.sash_place(0, 300, 0)
+
+        # Status Bar
+        self.status = tk.StringVar(value="Open a PDF to begin.")
+        status_bar = tk.Label(self, textvariable=self.status, anchor="w")
+        status_bar.pack(fill=tk.X)
+
+        self.geometry("1200x800")
+
+    def _add_new_group(self):
+        name = tk.simpledialog.askstring("New Color Group", "Enter a name for the new group:", parent=self)
+        if not name:
+            return
+
+        color_info = colorchooser.askcolor(title=f"Pick color for '{name}'")
+        if not color_info or not color_info[0]:
+            return
+        
+        r, g, b = color_info[0]
+        rgba = (int(r), int(g), int(b), 150)
+
+        group_id = f"group_{time.time()}" 
+        new_group = {
+            "id": group_id,
+            "name": name,
+            "color": rgba,
+            "regions": set()
+        }
+        self.color_groups.append(new_group)
+        self._update_region_list()
+        self.region_tree.selection_set(group_id)
+
+    def _rename_selected_group(self):
+        if not self.region_tree: return
+        selection = self.region_tree.selection()
+        if not selection or not selection[0].startswith("group_"):
+            messagebox.showwarning("Warning", "Please select a single group folder to rename.")
+            return
+        
+        group_id = selection[0]
+        group = next((g for g in self.color_groups if g['id'] == group_id), None)
+        if not group: return
+
+        new_name = tk.simpledialog.askstring("Rename Group", "Enter new name:", initialvalue=group['name'], parent=self)
+        if new_name:
+            group['name'] = new_name
+            self._update_region_list()
+
+    def _delete_selected_group(self):
+        if not self.region_tree: return
+        selection = self.region_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a group folder to delete.")
+            return
+
+        group_ids_to_delete = {item for item in selection if item.startswith("group_")}
+        if not group_ids_to_delete:
+            messagebox.showwarning("Warning", "No group selected to delete.")
+            return
+
+        if not messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete {len(group_ids_to_delete)} selected group(s) and all their regions?"):
+            return
+
+        self.color_groups = [g for g in self.color_groups if g['id'] not in group_ids_to_delete]
+        
+        self._redraw_all_overlays()
+        self._refresh_display()
+        self._update_region_list()
+        self.status.set(f"Deleted {len(group_ids_to_delete)} group(s).")
+
+    def _remove_selected_region(self):
+        if not self.region_tree: return
+        selection = self.region_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a region (Area) to remove.")
+            return
+
+        regions_to_remove = {item for item in selection if item.startswith("region_")}
+        if not regions_to_remove:
+            messagebox.showwarning("Warning", "No regions (Areas) selected to remove.")
+            return
+
+        for region_id_str in regions_to_remove:
+            region_id = int(region_id_str.split("_")[1])
+            parent_id = self.region_tree.parent(region_id_str)
+            group = next((g for g in self.color_groups if g['id'] == parent_id), None)
+
+            if group and region_id in group['regions']:
+                group['regions'].remove(region_id)
+        
+        self._redraw_all_overlays()
+        self._refresh_display()
+        self._update_region_list()
+        self.status.set(f"Removed {len(regions_to_remove)} region(s) from their groups.")
+
+    def _zoom_in(self):
+        self.zoom_level *= 1.25
+        self._refresh_display()
+
+    def _zoom_out(self):
+        self.zoom_level /= 1.25
+        if self.zoom_level < 0.1: self.zoom_level = 0.1
+        self._refresh_display()
+
+    def _on_mouse_wheel(self, event):
+        if event.delta > 0 or event.num == 4:
+            self.zoom_level *= 1.1
+        else:
+            self.zoom_level /= 1.1
+        if self.zoom_level < 0.1: self.zoom_level = 0.1
+        self._refresh_display()
+        return "break"
+
+    def _on_drag_start(self, event):
+        self.canvas.scan_mark(event.x, event.y)
+
+    def _on_drag_motion(self, event):
+        self.canvas.scan_dragto(event.x, event.y, gain=1)
+
+    # ---------- PDF Loading & Rendering ----------
+
+    def open_pdf(self):
+        path = filedialog.askopenfilename(
+            title="Open PDF", filetypes=[("PDF files", "*.pdf")]
+        )
+        if not path:
+            return
+        try:
+            self.pdf_doc = fitz.open(path)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open PDF:\n{e}")
+            return
+
+        self.page_count = self.pdf_doc.page_count
+        self.page_index = 0
+        self.status.set(f"Loaded: {os.path.basename(path)} | Pages: {self.page_count}")
+        self._load_page(self.page_index)
+
+    def _load_page(self, index: int):
+        if not self.pdf_doc or not (0 <= index < self.pdf_doc.page_count):
+            return
+
+        page = self.pdf_doc.load_page(index)
+        mat = fitz.Matrix(2.0, 2.0)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        pil = pil_from_pixmap(pix).convert("RGB")
+
+        self.base_image = pil
+        self.overlay_image = Image.new("RGBA", self.base_image.size, (0, 0, 0, 0))
+        self.color_groups.clear()
+        self.last_clicked_region = None
+        self.active_color_group_id = None
+        self._update_region_list()
+
+        self.status.set("Segmenting regions... (this may take a moment)")
+        self.update_idletasks()
+        self.segmentation = segment_closed_regions(
+            self.base_image,
+            dilation_radius=self.dilation_radius,
+            invert_lines=self.invert_lines,
+        )
+
+        num_regions = self.segmentation.num_labels
+        self.status.set(
+            f"Page {self.page_index + 1}/{self.page_count} | Regions detected: {num_regions} "
+            f"(border regions are not fillable)"
+        )
+        self._refresh_display()
+
+    def prev_page(self):
+        if self.pdf_doc and self.page_index > 0:
+            self.page_index -= 1
+            self._load_page(self.page_index)
+
+    def next_page(self):
+        if self.pdf_doc and self.page_index < self.page_count - 1:
+            self.page_index += 1
+            self._load_page(self.page_index)
+
+    # ---------- Display handling ----------
+
+    def _refresh_display(self):
+        if self.base_image is None:
+            return
+        
+        comp = alpha_composite(self.base_image.convert("RGBA"), self.overlay_image)
+        self.composited_display = comp
+
+        iw, ih = comp.size
+        scaled_iw = int(iw * self.zoom_level)
+        scaled_ih = int(ih * self.zoom_level)
+
+        disp_img = comp.resize((scaled_iw, scaled_ih), Image.Resampling.BILINEAR)
+        self.tk_img = ImageTk.PhotoImage(disp_img)
+
+        self.canvas.config(scrollregion=(0, 0, scaled_iw, scaled_ih))
+        self.canvas.delete("all")
+        self.canvas.create_image(0, 0, image=self.tk_img, anchor="nw")
+
+    def on_canvas_resize(self, event):
+        self._refresh_display()
+
+    # ---------- Interaction ----------
+
+    def _update_region_list(self):
+        if not self.region_tree:
+            return
+        
+        selection = self.region_tree.selection()
+        
+        for item in self.region_tree.get_children():
+            self.region_tree.delete(item)
+            
+        for group in sorted(self.color_groups, key=lambda g: g['name']):
+            color_hex = f"#{group['color'][0]:02x}{group['color'][1]:02x}{group['color'][2]:02x}"
+            group_node = self.region_tree.insert(
+                "", "end", iid=group['id'], text=group['name'], values=(color_hex,)
+            )
+            for region_id in sorted(list(group['regions'])):
+                self.region_tree.insert(group_node, "end", text=f"  Area {region_id}", iid=f"region_{region_id}")
+        
+        if selection:
+            try:
+                self.region_tree.selection_set(selection)
+            except tk.TclError:
+                # This can happen if the selected item was deleted
+                pass
+
+    def _on_region_select(self, event):
+        selection = self.region_tree.selection()
+        if not selection:
+            self.active_color_group_id = None
+            return
+        
+        last_selected_id = selection[-1]
+        if last_selected_id.startswith("group_"):
+            self.active_color_group_id = last_selected_id
+            self.status.set(f"Active group: '{self.region_tree.item(last_selected_id, 'text')}'. Click to add regions.")
+        elif last_selected_id.startswith("region_"):
+            parent_id = self.region_tree.parent(last_selected_id)
+            if parent_id:
+                self.active_color_group_id = parent_id
+            self.status.set(f"{len(selection)} region(s) selected.")
+
+    def pick_color(self):
+        messagebox.showinfo("Info", "To set a color, create a 'New Group' and choose its color, or select an existing group to make it active.")
+
+    def on_canvas_click(self, event):
+        if self.base_image is None or self.segmentation is None:
+            return
+
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+
+        x = int(canvas_x / self.zoom_level)
+        y = int(canvas_y / self.zoom_level)
+
+        if not (0 <= x < self.base_image.width and 0 <= y < self.base_image.height):
+            return
+
+        label = int(self.segmentation.label_map[y, x])
+        if label == 0 or label in self.segmentation.border_labels:
+            self.status.set("Clicked on a line or non-fillable area.")
+            return
+
+        if not self.active_color_group_id:
+            messagebox.showwarning("No Active Group", "Please select a color group from the list on the left before adding a region.")
+            return
+            
+        active_group = next((g for g in self.color_groups if g['id'] == self.active_color_group_id), None)
+        if not active_group:
+            messagebox.showerror("Error", "Active color group not found. Please re-select it.")
+            return
+
+        # Remove region from any other group before adding to the new one
+        for group in self.color_groups:
+            if label in group['regions']:
+                group['regions'].remove(label)
+        
+        active_group['regions'].add(label)
+        
+        self._redraw_all_overlays()
+        self._refresh_display()
+        self._update_region_list()
+        self.status.set(f"Added Region {label} to group '{active_group['name']}'.")
+
+    def _apply_overlay_for_region(
+        self, region_id: int, rgba: Tuple[int, int, int, int]
+    ):
+        if self.segmentation is None or self.overlay_image is None:
+            return
+        mask_bool = numpy_mask_from_label(self.segmentation.label_map, region_id)
+        mask_L = pil_mask_from_bool(mask_bool)
+        color_img = Image.new("RGBA", self.overlay_image.size, rgba)
+        self.overlay_image.paste(color_img, (0, 0), mask_L)
+
+        center_y, center_x = ndi.center_of_mass(mask_bool)
+        if math.isnan(center_y) or math.isnan(center_x):
+            return
+
+        brightness = (rgba[0] * 299 + rgba[1] * 587 + rgba[2] * 114) / 1000
+        text_color = (0, 0, 0, 255) if brightness > 128 else (255, 255, 255, 255)
+
+        draw = ImageDraw.Draw(self.overlay_image)
+        try:
+            font = ImageFont.truetype("arial.ttf", 24)
+        except IOError:
+            font = ImageFont.load_default()
+        
+        text = str(region_id)
+        text_bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = text_bbox[2] - text_bbox[0]
+        text_h = text_bbox[3] - text_bbox[1]
+        
+        draw.text(
+            (center_x - text_w / 2, center_y - text_h / 2),
+            text,
+            font=font,
+            fill=text_color
+        )
+
+    def _redraw_all_overlays(self):
+        if self.base_image is None: return
+        self.overlay_image = Image.new("RGBA", self.base_image.size, (0, 0, 0, 0))
+        for group in self.color_groups:
+            for region_id in group['regions']:
+                self._apply_overlay_for_region(region_id, group['color'])
+
+    def clear_fills(self):
+        if self.base_image is None:
+            return
+        self.color_groups.clear()
+        self.overlay_image = Image.new("RGBA", self.base_image.size, (0, 0, 0, 0))
+        self._refresh_display()
+        self._update_region_list()
+        self.status.set("Cleared all fills and groups.")
+
+    def set_dilation(self):
+        val_str = simpledialog.askstring("Set Line Dilation", "Dilation radius (integer, 0-10):", initialvalue=str(self.dilation_radius))
+        if val_str is None: return
+        try:
+            val = int(val_str)
+            if not (0 <= val <= 10): raise ValueError
+            self.dilation_radius = val
+            if self.base_image is not None:
+                self._load_page(self.page_index)
+        except (ValueError, TypeError):
+            messagebox.showerror("Error", "Invalid input. Please enter an integer between 0 and 10.")
+
+    def toggle_invert_lines(self):
+        self.invert_lines = not self.invert_lines
+        status_msg = "ON" if self.invert_lines else "OFF"
+        self.status.set(f"Invert lines (white-on-black) is now {status_msg}.")
+        if self.base_image is not None:
+            self._load_page(self.page_index)
+
+    # ---------- Export ----------
+
+    def _get_selected_regions_for_export(self) -> set:
+        if not self.region_tree: return set()
+        selection = self.region_tree.selection()
+        if not selection: return set()
+
+        regions_to_export = set()
+        all_groups = {g['id']: g for g in self.color_groups}
+
+        for item_id in selection:
+            if item_id.startswith("group_"):
+                group = all_groups.get(item_id)
+                if group:
+                    for region_id in group['regions']:
+                        regions_to_export.add((region_id, group['color']))
+            elif item_id.startswith("region_"):
+                region_id = int(item_id.split("_")[1])
+                parent_id = self.region_tree.parent(item_id)
+                group = all_groups.get(parent_id)
+                if group:
+                    regions_to_export.add((region_id, group['color']))
+        
+        return regions_to_export
+
+    def export_selected_regions_png(self):
+        if self.base_image is None or self.segmentation is None: return
+
+        regions_to_export = self._get_selected_regions_for_export()
+        if not regions_to_export:
+            messagebox.showinfo("Info", "No regions are selected for export. Select items from the list on the left.")
+            return
+
+        export_img = Image.new("RGBA", self.base_image.size, (0, 0, 0, 0))
+
+        for region_id, rgba in regions_to_export:
+            mask_bool = numpy_mask_from_label(self.segmentation.label_map, region_id)
+            mask_L = pil_mask_from_bool(mask_bool)
+            color_img = Image.new("RGBA", self.base_image.size, rgba)
+            export_img.paste(color_img, (0, 0), mask_L)
+
+        path = filedialog.asksaveasfilename(
+            title="Save Selected Regions as PNG",
+            defaultextension=".png",
+            filetypes=[("PNG image", "*.png")],
+            initialfile=f"page{self.page_index+1:02d}_selected_regions.png",
+        )
+        if not path: return
+        try:
+            export_img.save(path, format="PNG")
+            self.status.set(f"Saved {len(regions_to_export)} selected regions to {os.path.basename(path)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save PNG:\n{e}")
+
+    def export_all_regions_pngs(self):
+        if self.base_image is None or not self.color_groups:
+            messagebox.showinfo("Info", "No colored regions to export.")
+            return
+        outdir = filedialog.askdirectory(title="Select output directory for PNGs")
+        if not outdir: return
+        
+        count = 0
+        try:
+            for group in self.color_groups:
+                rgba = group['color']
+                for region_id in group['regions']:
+                    mask_bool = numpy_mask_from_label(self.segmentation.label_map, region_id)
+                    mask_L = pil_mask_from_bool(mask_bool)
+                    region_img = Image.new("RGBA", self.base_image.size, (0, 0, 0, 0))
+                    color_img = Image.new("RGBA", self.base_image.size, rgba)
+                    region_img.paste(color_img, (0, 0), mask_L)
+
+                    fname = f"page{self.page_index+1:02d}_group_{group['name']}_region_{region_id}.png"
+                    region_img.save(os.path.join(outdir, fname), format="PNG")
+                    count += 1
+            self.status.set(f"Saved {count} region PNGs to {outdir}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export region PNGs:\n{e}")
+
+    def export_composite_png(self):
+        if self.composited_display is None:
+            messagebox.showinfo("Info", "Nothing to export.")
+            return
+        
+        full_comp = alpha_composite(self.base_image.convert("RGBA"), self.overlay_image)
+        path = filedialog.asksaveasfilename(
+            title="Save composited PNG",
+            defaultextension=".png",
+            filetypes=[("PNG image", "*.png")],
+            initialfile=f"page{self.page_index+1:02d}_composite.png"
+        )
+        if not path: return
+        try:
+            full_comp.save(path, format="PNG")
+            self.status.set(f"Saved composite PNG to {os.path.basename(path)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save PNG:\n{e}")
+
+    def export_current_region_pdf(self):
+        if self.base_image is None or self.segmentation is None: return
+
+        selection = self.region_tree.selection()
+        if len(selection) != 1 or not selection[0].startswith("region_"):
+            messagebox.showwarning("Invalid Selection", "Please select exactly one region (Area) from the list to export as a PDF.")
+            return
+
+        regions_to_export = self._get_selected_regions_for_export()
+        if not regions_to_export: return # Should not happen due to check above
+
+        region_id, rgba = list(regions_to_export)[0]
+
+        mask_bool = numpy_mask_from_label(self.segmentation.label_map, region_id)
+        mask_L = pil_mask_from_bool(mask_bool)
+        region_img = Image.new("RGBA", self.base_image.size, (0, 0, 0, 0))
+        color_img = Image.new("RGBA", self.base_image.size, rgba)
+        region_img.paste(color_img, (0, 0), mask_L)
+
+        png_bytes = io.BytesIO()
+        region_img.save(png_bytes, format="PNG")
+        png_bytes = png_bytes.getvalue()
+
+        path = filedialog.asksaveasfilename(
+            title="Save region as PDF",
+            defaultextension=".pdf",
+            filetypes=[("PDF", "*.pdf")],
+            initialfile=f"page{self.page_index+1:02d}_region_{region_id}.pdf"
+        )
+        if not path: return
+
+        try:
+            h, w = self.base_image.size[1], self.base_image.size[0]
+            doc = fitz.open()
+            page = doc.new_page(width=w, height=h)
+            rect = fitz.Rect(0, 0, w, h)
+            page.insert_image(rect, stream=png_bytes, keep_proportion=False)
+            doc.save(path)
+            doc.close()
+            self.status.set(f"Saved current region PDF to {os.path.basename(path)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save PDF:\n{e}")
+
+
+# -------------------------
+# Main
+# -------------------------
+if __name__ == "__main__":
+    app = ColorFillPDFApp()
+    app.mainloop()

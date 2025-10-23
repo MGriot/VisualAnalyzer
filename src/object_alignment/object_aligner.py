@@ -103,7 +103,8 @@ class AdvancedAligner:
     def _find_largest_contour(self, img):
         """
         Helper to find the largest contour in an image after preprocessing.
-        (Updated with logic from the new file for better contour detection).
+        This version adds a fallback to the second-largest contour if the largest
+        one is likely the image frame itself.
         """
         gray = (
             cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img.copy()
@@ -118,12 +119,30 @@ class AdvancedAligner:
         contours, _ = cv2.findContours(
             binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
-        valid_contours = [
-            c for c in contours if cv2.contourArea(c) > self.min_contour_area
-        ]
+        
+        # Filter contours by minimum area and sort them from largest to smallest
+        valid_contours = sorted(
+            [c for c in contours if cv2.contourArea(c) > self.min_contour_area],
+            key=cv2.contourArea,
+            reverse=True
+        )
+
         if not valid_contours:
             return None
-        return max(valid_contours, key=cv2.contourArea)
+
+        # Check if the largest contour is suspiciously large (e.g., >95% of image area)
+        image_area = img.shape[0] * img.shape[1]
+        largest_contour_area = cv2.contourArea(valid_contours[0])
+        
+        # If the largest contour is almost the size of the whole image and a second contour exists,
+        # it's likely the frame. In that case, choose the second largest.
+        if len(valid_contours) > 1 and (largest_contour_area / image_area) > 0.95:
+            if self.debug_mode:
+                print(f"[DEBUG] Largest contour area ({largest_contour_area}) is >95% of image area ({image_area}). Falling back to second-largest contour.")
+            return valid_contours[1] # Return the second largest
+        
+        # Otherwise, return the largest contour as intended
+        return valid_contours[0]
 
     # --- NEW HELPER METHODS for POINT ORDERING ---
     def _order_points_quad(self, pts):

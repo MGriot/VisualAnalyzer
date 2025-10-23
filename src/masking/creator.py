@@ -239,4 +239,4 @@ def create_and_apply_mask_from_layers(
         debug_paths.append({'title': "Final Applied Mask", 'path': mask_path})
         debug_paths.append({'title': "After Masking", 'path': path})
 
-    return {'image': masked_image, 'debug_paths': debug_paths, 'stats': mask_stats}
+    return {'image': masked_image, 'debug_paths': debug_paths, 'stats': mask_stats, 'path': path}

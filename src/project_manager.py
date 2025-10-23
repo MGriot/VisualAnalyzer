@@ -130,6 +130,11 @@ class ProjectManager:
             if geo_config.reference_path
             else None
         )
+        logo_path = (
+            project_path / config_data.logo_path
+            if config_data.logo_path
+            else None
+        )
         drawing_paths = {
             key: project_path / path
             for key, path in mask_config.drawing_layers.items()
@@ -165,6 +170,7 @@ class ProjectManager:
             "geometrical_alignment_config": geo_config,
             "geometrical_alignment_reference_path": aruco_ref_path,
             "object_reference_path": object_ref_path,
+            "logo_path": logo_path,
         }
 
     def calculate_hsv_range_from_dataset(

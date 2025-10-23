@@ -25,7 +25,8 @@ from src.reporting.archiver import ReportArchiver
 try:
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
+    from reportlab.lib.units import inch, cm
+    from reportlab.lib.utils import ImageReader
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
     from reportlab.lib.pagesizes import A4
@@ -375,7 +376,30 @@ class ReportGenerator:
             part_number = report_data.get("part_number", "report")
             pdf_path = self.project_output_dir / f"{prefix}{part_number}_reportlab.pdf"
 
-        doc = SimpleDocTemplate(str(pdf_path), pagesize=A4, topMargin=inch/2, bottomMargin=inch/2)
+        logo_path_str = report_data.get('logo')
+        logo_abs_path = base_dir / logo_path_str if logo_path_str else None
+
+        def _draw_header(canvas, doc):
+            canvas.saveState()
+            if logo_abs_path and logo_abs_path.is_file():
+                try:
+                    logo_max_width = 2.5 * cm
+                    img_reader = ImageReader(str(logo_abs_path))
+                    img_w, img_h = img_reader.getSize()
+                    aspect = img_h / float(img_w) if img_w > 0 else 1
+                    
+                    draw_w = min(logo_max_width, img_w)
+                    draw_h = draw_w * aspect
+                    
+                    x = doc.pagesize[0] - doc.rightMargin - draw_w
+                    y = doc.pagesize[1] - doc.topMargin - draw_h
+                    
+                    canvas.drawImage(img_reader, x, y, width=draw_w, height=draw_h, mask='auto')
+                except Exception as e:
+                    print(f"[ReportLab] Failed to draw logo: {e}")
+            canvas.restoreState()
+
+        doc = SimpleDocTemplate(str(pdf_path), pagesize=A4, topMargin=1.5*inch, bottomMargin=inch/2, onFirstPage=_draw_header)
         styles = getSampleStyleSheet()
         story = []
 
@@ -424,7 +448,10 @@ class ReportGenerator:
         story.append(meta_table)
         story.append(Spacer(1, 0.2*inch))
 
-        add_image('analyzed_image_path', 'Image Before Color Analysis')
+        if report_data.get('masked_image_path'):
+            add_image('masked_image_path', 'Image After Masking')
+        else:
+            add_image('analyzed_image_path', 'Image Before Color Analysis')
         add_image('contours_image_path', 'Image After Color Analysis (with Contours)')
         
         # Safely get analysis results for pie chart
@@ -530,7 +557,7 @@ class ReportGenerator:
         if self.debug_mode:
             print(f"ReportLab PDF report saved to {pdf_path}")
 
-    def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None, external_pdf_path: str = None):
+    def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None, external_pdf_path: str = None, masked_image_path: str = None, logo_path: Path = None):
         """
         Generates all specified report files (HTML, PDF) from the analysis results.
 
@@ -554,11 +581,17 @@ class ReportGenerator:
         orig_img_path = reporting_dir / Path(analysis_results['original_image_path']).name
         shutil.copy(analysis_results['original_image_path'], orig_img_path)
 
-        logo_path = ""
-        if config.LOGO_PATH.is_file():
+        final_logo_path = ""
+        # Prioritize project-specific logo
+        if logo_path and logo_path.is_file():
+            logo_dest = reporting_dir / logo_path.name
+            shutil.copy(logo_path, logo_dest)
+            final_logo_path = os.path.relpath(logo_dest, self.project_output_dir)
+        # Fallback to global logo
+        elif config.LOGO_PATH.is_file():
             logo_dest = reporting_dir / config.LOGO_PATH.name
             shutil.copy(config.LOGO_PATH, logo_dest)
-            logo_path = os.path.relpath(logo_dest, self.project_output_dir)
+            final_logo_path = os.path.relpath(logo_dest, self.project_output_dir)
 
         processed_dataset_info, dataset_color_space_plot_path = None, None
         if debug_data and 'dataset_debug_info' in debug_data:
@@ -569,7 +602,7 @@ class ReportGenerator:
             "project_name": self.project_name,
             "author": config.AUTHOR, "department": config.DEPARTMENT,
             "report_title": f"{config.REPORT_TITLE} - {self.project_name}",
-            "logo": logo_path,
+            "logo": final_logo_path,
             "today": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S" if self.debug_mode else "%Y-%m-%d"),
             "part_number": metadata.get("part_number", "N/A"),
             "thickness": metadata.get("thickness", "N/A"),
@@ -582,6 +615,7 @@ class ReportGenerator:
             "debug_data": debug_data,
             "dataset_debug_info": processed_dataset_info,
             "dataset_color_space_plot_path": dataset_color_space_plot_path,
+            "masked_image_path": masked_image_path,
         }
 
         template_vars['analysis_results_raw'] = analysis_results

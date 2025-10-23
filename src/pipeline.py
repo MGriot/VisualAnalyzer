@@ -91,6 +91,7 @@ class Pipeline:
         self.metadata_overrides = None  # Add override placeholder
         self.debug_data_for_report = {}
         self.debug_image_pipeline = []
+        self.masked_image_path = None
         self.pipeline_step_counter = 1
         self.pipeline_image_stages = {} # To store image output of each step
 
@@ -457,6 +458,7 @@ class Pipeline:
         )
 
         self.image_to_be_processed = result["image"]
+        self.masked_image_path = result.get("path")
         self.pipeline_image_stages["masked"] = self.image_to_be_processed.copy()
         if result.get("stats"):
             self.debug_data_for_report["masking_stats"] = result["stats"]
@@ -599,11 +601,22 @@ class Pipeline:
         # Add the collected pipeline images to the main debug data dictionary
         self.debug_data_for_report["image_pipeline"] = self.debug_image_pipeline
 
+        masked_image_path_relative = None
+        if self.masked_image_path:
+            masked_image_path_relative = os.path.relpath(
+                self.masked_image_path, self.report_generator.project_output_dir
+            )
+
+        project_files = self.project_manager.get_project_file_paths(self.args.project, self.args.debug)
+        logo_path = project_files.get("logo_path")
+
         report_data = self.report_generator.generate_report(
             self.analysis_results,
             self.metadata,
             debug_data=self.debug_data_for_report,
             external_pdf_path=external_pdf_path,
+            masked_image_path=masked_image_path_relative,
+            logo_path=logo_path,
         )
         return report_data
 
