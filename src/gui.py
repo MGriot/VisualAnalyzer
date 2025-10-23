@@ -50,6 +50,7 @@ class VisualAnalyzerGUI(tk.Tk):
         self.image_path_var = tk.StringVar()
         self.part_number_var = tk.StringVar()
         self.thickness_var = tk.StringVar()
+        self.author_var = tk.StringVar()
         self.color_checker_path_var = tk.StringVar()
         self.color_correction_method_var = tk.StringVar(value="linear")
         self.masking_order_var = tk.StringVar(value="1-2-3")
@@ -110,6 +111,9 @@ class VisualAnalyzerGUI(tk.Tk):
 
         tk.Label(metadata_frame, text="Thickness:").grid(row=0, column=2, sticky=tk.W, padx=(10, 5))
         tk.Entry(metadata_frame, textvariable=self.thickness_var).grid(row=0, column=3, sticky=tk.EW)
+
+        tk.Label(metadata_frame, text="Author:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5,0))
+        tk.Entry(metadata_frame, textvariable=self.author_var).grid(row=1, column=1, columnspan=3, sticky=tk.EW, pady=(5,0))
 
         tk.Button(
             file_frame, text="Select Color Checker", command=self.select_color_checker
@@ -497,6 +501,7 @@ class VisualAnalyzerGUI(tk.Tk):
         
         args.part_number = self.part_number_var.get()
         args.thickness = self.thickness_var.get()
+        args.author = self.author_var.get()
 
         args.video = None
         args.camera = False

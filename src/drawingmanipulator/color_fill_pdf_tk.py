@@ -291,6 +291,7 @@ class ColorFillPDFApp(tk.Tk):
         self.region_tree.bind("<<TreeviewSelect>>", self._on_region_select)
         
         tk.Button(left_pane, text="Remove Selected Region(s)", command=self._remove_selected_region).pack(fill=tk.X, padx=5, pady=5)
+        tk.Button(left_pane, text="Merge Selected Regions", command=self._merge_selected_regions).pack(fill=tk.X, padx=5, pady=5)
 
         # -- Segmentation Settings --
         seg_frame = tk.LabelFrame(left_pane, text="Segmentation")
@@ -403,6 +404,83 @@ class ColorFillPDFApp(tk.Tk):
         self._refresh_display()
         self._update_region_list()
         self.status.set(f"Removed {len(regions_to_remove)} region(s).")
+
+    def _merge_selected_regions(self):
+        if not self.region_tree or self.segmentation is None: return
+
+        selection = self.region_tree.selection()
+        region_ids_str = {item for item in selection if item.startswith("region_")}
+
+        if len(region_ids_str) < 2:
+            messagebox.showwarning("Selection Error", "Please select at least two regions (Areas) to merge.")
+            return
+
+        # Verify all selected regions belong to the same group
+        parent_ids = {self.region_tree.parent(item) for item in region_ids_str}
+        if len(parent_ids) > 1:
+            messagebox.showwarning("Selection Error", "All regions to be merged must belong to the same color group.")
+            return
+        
+        parent_id = parent_ids.pop()
+        if not parent_id:
+            messagebox.showerror("Error", "Could not find the parent color group.")
+            return
+
+        group = next((g for g in self.color_groups if g['id'] == parent_id), None)
+        if not group:
+            messagebox.showerror("Error", "Could not find the parent color group data.")
+            return
+
+        # Prompt user for merge strength
+        dilation_amount = simpledialog.askinteger(
+            "Merge Strength", 
+            "Enter connection strength (higher for distant regions):",
+            initialvalue=self.dilation_radius + 3, minvalue=1, maxvalue=100, parent=self
+        )
+        if dilation_amount is None: # User cancelled
+            return
+
+        # --- Start of new logic ---
+        label_map = self.segmentation.label_map
+        region_ids = sorted([int(s.split("_")[1]) for s in region_ids_str])
+        
+        # 1. Identify protected regions that should not be overwritten
+        labels_to_merge = set(region_ids)
+        all_labels_on_page = set(np.unique(label_map)) - {0}
+        protected_labels = all_labels_on_page - labels_to_merge
+        
+        protected_mask = np.zeros_like(label_map, dtype=bool)
+        for label_id in protected_labels:
+            protected_mask[label_map == label_id] = True
+
+        # 2. Iteratively merge regions
+        target_label, *source_labels = region_ids
+        self.status.set(f"Merging {len(source_labels) + 1} regions...")
+        self.update_idletasks()
+
+        for source_label in source_labels:
+            mask_target = (label_map == target_label)
+            mask_source = (label_map == source_label)
+
+            dilated_target = ndi.binary_dilation(mask_target, iterations=dilation_amount)
+            dilated_source = ndi.binary_dilation(mask_source, iterations=dilation_amount)
+            
+            # 3. Create a fat bridge and ensure it doesn't touch protected regions
+            bridge_mask = dilated_target & dilated_source
+            safe_bridge_mask = bridge_mask & ~protected_mask
+
+            # 4. Update the label map with the source region and the safe, fat bridge
+            label_map[mask_source] = target_label
+            label_map[safe_bridge_mask] = target_label
+
+            if source_label in group["regions"]:
+                group["regions"].remove(source_label)
+        # --- End of new logic ---
+
+        self.status.set(f"Merge complete. New region is Area {target_label}.")
+        self._redraw_all_overlays()
+        self._refresh_display()
+        self._update_region_list()
 
     def _zoom_in(self):
         self.zoom_level *= 1.25

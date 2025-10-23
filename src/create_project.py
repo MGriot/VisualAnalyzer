@@ -85,7 +85,7 @@ def create_project(project_name: str):
         default_project_config = {
             "training_path": "dataset/training_images",
             "object_reference_path": "dataset/object_reference.png",
-            "logo_path": "dataset/logo.png",
+
             "color_correction": {
                 "reference_color_checker_path": f"dataset/{cc_aruco_filename}",
                 "project_specific_color_checker_path": "dataset/project_color_checker.png"

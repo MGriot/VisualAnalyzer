@@ -442,8 +442,8 @@ class ReportGenerator:
         story.append(Spacer(1, 0.2*inch))
 
         meta_table = Table([
-            ['Author:', report_data.get('author', 'N/A'), 'Part Number:', report_data.get('metadata', {}).get('part_number', 'N/A')],
-            ['Date:', report_data.get('today', 'N/A'), 'Thickness:', report_data.get('metadata', {}).get('thickness', 'N/A')]
+            ['Author:', report_data.get('author', 'N/A'), 'Part Number:', report_data.get('part_number', 'N/A')],
+            ['Date:', report_data.get('today', 'N/A'), 'Thickness:', report_data.get('thickness', 'N/A')]
         ], colWidths=[1*inch, 2.5*inch, 1*inch, 2.5*inch])
         story.append(meta_table)
         story.append(Spacer(1, 0.2*inch))
@@ -582,16 +582,17 @@ class ReportGenerator:
         shutil.copy(analysis_results['original_image_path'], orig_img_path)
 
         final_logo_path = ""
-        # Prioritize project-specific logo
-        if logo_path and logo_path.is_file():
-            logo_dest = reporting_dir / logo_path.name
-            shutil.copy(logo_path, logo_dest)
+        # Define the absolute path to the correct global logo
+        true_logo_path = config.DATA_DIR / "logo" / "logo.png"
+
+        if true_logo_path.is_file():
+            # The destination for the logo is inside the 'reporting' subfolder
+            logo_dest = reporting_dir / true_logo_path.name
+            shutil.copy(true_logo_path, logo_dest)
+            # The final path in the report must be relative to the report's root directory
             final_logo_path = os.path.relpath(logo_dest, self.project_output_dir)
-        # Fallback to global logo
-        elif config.LOGO_PATH.is_file():
-            logo_dest = reporting_dir / config.LOGO_PATH.name
-            shutil.copy(config.LOGO_PATH, logo_dest)
-            final_logo_path = os.path.relpath(logo_dest, self.project_output_dir)
+        else:
+            print(f"[WARNING] Global logo not found at '{true_logo_path}'")
 
         processed_dataset_info, dataset_color_space_plot_path = None, None
         if debug_data and 'dataset_debug_info' in debug_data:
@@ -600,7 +601,7 @@ class ReportGenerator:
 
         template_vars = {
             "project_name": self.project_name,
-            "author": config.AUTHOR, "department": config.DEPARTMENT,
+            "author": metadata.get("author", config.AUTHOR) or config.AUTHOR, "department": config.DEPARTMENT,
             "report_title": f"{config.REPORT_TITLE} - {self.project_name}",
             "logo": final_logo_path,
             "today": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S" if self.debug_mode else "%Y-%m-%d"),
