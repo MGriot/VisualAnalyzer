@@ -250,7 +250,7 @@ class ReportGenerator:
             str: The relative path to the generated dataset color space plot image.
         """
         step_dir = self.get_step_output_dir("reporting")
-        fig, ax = plt.subplots(figsize=(12, 8))
+        fig, ax = plt.subplots(figsize=(10, 8))
 
         all_h_vals = []
         all_s_vals = []
@@ -285,12 +285,27 @@ class ReportGenerator:
 
         ax.scatter(h_sample, s_sample, c=color_sample, s=50, alpha=0.8, edgecolors='black')
 
-        # Create a legend with unique colors
-        unique_colors = {tuple(c): os.path.basename(item['path']) for item in dataset_debug_info for c in all_colors}
-        legend_elements = [plt.Line2D([0], [0], marker='o', color='w', label=label, markerfacecolor=color, markersize=10) for color, label in unique_colors.items()]
-        ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+        # Add the boundary box for the robust color range
+        rect_width = upper_hsv[0] - lower_hsv[0]
+        rect_height = upper_hsv[1] - lower_hsv[1]
+        boundary_box = Rectangle(
+            (lower_hsv[0], lower_hsv[1]),
+            rect_width,
+            rect_height,
+            linewidth=2,
+            edgecolor='r',
+            facecolor='none',
+            linestyle='--'
+        )
+        ax.add_patch(boundary_box)
+
+        ax.set_xlabel("Hue (0-179)")
+        ax.set_ylabel("Saturation (0-255)")
+        ax.set_title("Dataset Color Space Distribution with Robust Range")
+        ax.set_xlim(0, 180)
+        ax.set_ylim(0, 256)
         ax.grid(True, linestyle='--', alpha=0.6)
-        fig.tight_layout(rect=[0, 0, 0.85, 1])
+        fig.tight_layout()
 
         plot_path = step_dir / "dataset_color_space.png"
         plt.savefig(plot_path)
@@ -376,30 +391,7 @@ class ReportGenerator:
             part_number = report_data.get("part_number", "report")
             pdf_path = self.project_output_dir / f"{prefix}{part_number}_reportlab.pdf"
 
-        logo_path_str = report_data.get('logo')
-        logo_abs_path = base_dir / logo_path_str if logo_path_str else None
-
-        def _draw_header(canvas, doc):
-            canvas.saveState()
-            if logo_abs_path and logo_abs_path.is_file():
-                try:
-                    logo_max_width = 2.5 * cm
-                    img_reader = ImageReader(str(logo_abs_path))
-                    img_w, img_h = img_reader.getSize()
-                    aspect = img_h / float(img_w) if img_w > 0 else 1
-                    
-                    draw_w = min(logo_max_width, img_w)
-                    draw_h = draw_w * aspect
-                    
-                    x = doc.pagesize[0] - doc.rightMargin - draw_w
-                    y = doc.pagesize[1] - doc.topMargin - draw_h
-                    
-                    canvas.drawImage(img_reader, x, y, width=draw_w, height=draw_h, mask='auto')
-                except Exception as e:
-                    print(f"[ReportLab] Failed to draw logo: {e}")
-            canvas.restoreState()
-
-        doc = SimpleDocTemplate(str(pdf_path), pagesize=A4, topMargin=1.5*inch, bottomMargin=inch/2, onFirstPage=_draw_header)
+        doc = SimpleDocTemplate(str(pdf_path), pagesize=A4, topMargin=1.5*inch, bottomMargin=inch/2)
         styles = getSampleStyleSheet()
         story = []
 
@@ -410,6 +402,25 @@ class ReportGenerator:
         body_style = styles['BodyText']
         code_style = styles['Code']
         path_style = ParagraphStyle('path_style', parent=styles['Italic'], fontSize=8, textColor=colors.grey)
+
+        # --- Add logo as a flowable at the top ---
+        logo_path_str = report_data.get('logo')
+        logo_abs_path = base_dir / logo_path_str if logo_path_str else None
+        if logo_abs_path and logo_abs_path.is_file():
+            try:
+                logo_max_width = 2.5 * cm
+                img_reader = ImageReader(str(logo_abs_path))
+                img_w, img_h = img_reader.getSize()
+                aspect = img_h / float(img_w) if img_w > 0 else 1
+                draw_w = min(logo_max_width, img_w)
+                draw_h = draw_w * aspect
+                
+                logo_img = Image(str(logo_abs_path), width=draw_w, height=draw_h)
+                logo_img.hAlign = 'RIGHT'
+                story.append(logo_img)
+                story.append(Spacer(1, 0.2*inch)) # Add some space after the logo
+            except Exception as e:
+                print(f"[ReportLab] Failed to create logo Image flowable: {e}")
 
         # Enhanced add_image helper function
         def add_image(path_key, caption_text, width=6*inch):
@@ -435,7 +446,7 @@ class ReportGenerator:
                     story.append(Paragraph(f"<i>Could not load image: {os.path.basename(img_path_str)} ({e})</i>", body_style))
             else:
                 story.append(Paragraph(f"<i>(Image not found at {img_path_str})</i>", body_style))
-                story.append(Spacer(1, 0.1*inch))
+            story.append(Spacer(1, 0.1*inch))
 
         # --- Main Report Content ---
         story.append(Paragraph(report_data.get('report_title', 'Analysis Report'), title_style))
@@ -557,6 +568,203 @@ class ReportGenerator:
         if self.debug_mode:
             print(f"ReportLab PDF report saved to {pdf_path}")
 
+
+        def _generate_reportlab_pdf(self, report_data: dict, base_dir: Path, pdf_path_override: str = None):
+            """
+            Generates a PDF report using the ReportLab library.
+    
+            This method constructs the PDF document by adding various elements like
+            text, tables, and images based on the provided `report_data`.
+    
+            Args:
+                report_data (dict): A dictionary containing all the data required for the report.
+                base_dir (Path): The base directory from which relative image paths are resolved.
+                pdf_path_override (str, optional): If provided, save the PDF to this exact path.
+                                                   Otherwise, generate a default path.
+            """
+            if pdf_path_override:
+                pdf_path = pdf_path_override
+            else:
+                prefix = "debug_" if self.debug_mode else ""
+                part_number = report_data.get("part_number", "report")
+                pdf_path = self.project_output_dir / f"{prefix}{part_number}_reportlab.pdf"
+    
+            doc = SimpleDocTemplate(str(pdf_path), pagesize=A4, topMargin=1.5*inch, bottomMargin=inch/2)
+            styles = getSampleStyleSheet()
+            story = []
+    
+            # Custom styles
+            title_style = styles['h1']
+            h2_style = styles['h2']
+            h3_style = styles['h3']
+            body_style = styles['BodyText']
+            code_style = styles['Code']
+            path_style = ParagraphStyle('path_style', parent=styles['Italic'], fontSize=8, textColor=colors.grey)
+    
+            # --- Add logo as a flowable at the top ---
+            logo_path_str = report_data.get('logo')
+            logo_abs_path = base_dir / logo_path_str if logo_path_str else None
+            if logo_abs_path and logo_abs_path.is_file():
+                try:
+                    logo_max_width = 2.5 * cm
+                    img_reader = ImageReader(str(logo_abs_path))
+                    img_w, img_h = img_reader.getSize()
+                    aspect = img_h / float(img_w) if img_w > 0 else 1
+                    draw_w = min(logo_max_width, img_w)
+                    draw_h = draw_w * aspect
+                    
+                    logo_img = Image(str(logo_abs_path), width=draw_w, height=draw_h)
+                    logo_img.hAlign = 'RIGHT'
+                    story.append(logo_img)
+                    story.append(Spacer(1, 0.2*inch)) # Add some space after the logo
+                except Exception as e:
+                    print(f"[ReportLab] Failed to create logo Image flowable: {e}")
+    
+            # Enhanced add_image helper function
+            def add_image(path_key, caption_text, width=6*inch):
+                img_path_str = report_data.get(path_key)
+                # Handle cases where the path_key itself is the path (for pipeline images)
+                if not img_path_str and isinstance(path_key, str) and (path_key.endswith('.png') or path_key.endswith('.jpg')):
+                    img_path_str = path_key
+    
+                story.append(Paragraph(caption_text, h3_style))
+                if not img_path_str:
+                    story.append(Paragraph(f"<i>(Image path not found in report data for key: {path_key})</i>", body_style))
+                    story.append(Spacer(1, 0.1*inch))
+                    return
+    
+                img_path = base_dir / img_path_str
+                if img_path.is_file():
+                    try:
+                        img = Image(str(img_path), width=width, height=width/1.5, kind='proportional')
+                        story.append(img)
+                        story.append(Paragraph(f"Path: {img_path_str}", path_style))
+                        story.append(Spacer(1, 0.1*inch))
+                    except Exception as e:
+                        story.append(Paragraph(f"<i>Could not load image: {os.path.basename(img_path_str)} ({e})</i>", body_style))
+                else:
+                    story.append(Paragraph(f"<i>(Image not found at {img_path_str})</i>", body_style))
+                story.append(Spacer(1, 0.1*inch))
+    
+            # --- Main Report Content ---
+            story.append(Paragraph(report_data.get('report_title', 'Analysis Report'), title_style))
+            story.append(Spacer(1, 0.2*inch))
+    
+            meta_table = Table([
+                ['Author:', report_data.get('author', 'N/A'), 'Part Number:', report_data.get('part_number', 'N/A')],
+                ['Date:', report_data.get('today', 'N/A'), 'Thickness:', report_data.get('thickness', 'N/A')]
+            ], colWidths=[1*inch, 2.5*inch, 1*inch, 2.5*inch])
+            story.append(meta_table)
+            story.append(Spacer(1, 0.2*inch))
+    
+            if report_data.get('masked_image_path'):
+                add_image('masked_image_path', 'Image After Masking')
+            else:
+                add_image('analyzed_image_path', 'Image Before Color Analysis')
+            add_image('contours_image_path', 'Image After Color Analysis (with Contours)')
+            
+            # Safely get analysis results for pie chart
+            analysis_results = report_data.get('analysis_results_raw', {})
+            pie_chart_path = self._generate_pie_chart(analysis_results.get('matched_pixels', 0), analysis_results.get('total_pixels', 0), analysis_results.get('selected_colors', []))
+            add_image(pie_chart_path, 'Pixel-Percentage Pie Chart', width=4*inch)
+    
+            # --- Debug Section ---
+            if self.debug_mode and "debug_data" in report_data:
+                debug_data = report_data["debug_data"]
+                story.append(PageBreak())
+                story.append(Paragraph("Debug Report", title_style))
+                story.append(Spacer(1, 0.2*inch))
+    
+                story.append(Paragraph("Analysis Details", h2_style))
+                debug_table_data = []
+                for key, value in debug_data.items():
+                    if key in ['image_pipeline', 'dataset_debug_info', 'symmetry_visualizations', 'symmetry_results']:
+                        continue
+                    
+                    try:
+                        value_str = json.dumps(value, indent=2) if isinstance(value, (dict, list)) else str(value)
+                    except TypeError:
+                        value_str = "<Contains non-serializable data>"
+    
+                    debug_table_data.append([Paragraph(str(key), body_style), Paragraph(value_str.replace('\n', '<br/>'), code_style)])
+    
+                if debug_table_data:
+                    tbl = Table(debug_table_data, colWidths=[2*inch, 4.5*inch], repeatRows=1)
+                    tbl.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (0,-1), colors.lightgrey),
+                        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                        ('GRID', (0,0), (-1,-1), 1, colors.black),
+                        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                    ]))
+                    story.append(tbl)
+                story.append(Spacer(1, 0.2*inch))
+    
+                if 'image_pipeline' in debug_data:
+                    story.append(PageBreak())
+                    story.append(Paragraph("Image Processing Pipeline", h2_style))
+                    story.append(Spacer(1, 0.2*inch))
+                    for step in debug_data['image_pipeline']:
+                        add_image(step['path'], step['title'])
+                
+                if debug_data.get('symmetry_results'):
+                    story.append(PageBreak())
+                    story.append(Paragraph("Symmetry Analysis", h2_style))
+                    story.append(Paragraph("Scores:", h3_style))
+                    scores_only = {k: v.get('score', 'N/A') for k, v in debug_data['symmetry_results'].items() if isinstance(v, dict)}
+                    symmetry_scores = [[k,v] for k,v in scores_only.items()]
+                    if symmetry_scores:
+                        tbl = Table(symmetry_scores, colWidths=[2.5*inch, 4*inch])
+                        tbl.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (0,-1), colors.lightgrey),
+                            ('GRID', (0,0), (-1,-1), 1, colors.black),
+                        ]))
+                        story.append(tbl)
+                    story.append(Spacer(1, 0.2*inch))
+                    
+                    if debug_data.get('symmetry_visualizations'):
+                        story.append(Paragraph("Visualizations:", h3_style))
+                        for step in debug_data['symmetry_visualizations']:
+                            add_image(step['path'], step['title'])
+    
+                if report_data.get('dataset_color_space_plot_path'):
+                    story.append(PageBreak())
+                    story.append(Paragraph("Dataset Color Space Definition", h2_style))
+                    add_image('dataset_color_space_plot_path', 'Training Data Distribution')
+                    if report_data.get('dataset_debug_info'):
+                        for item in report_data['dataset_debug_info']:
+                            story.append(Paragraph(f"Sample: {os.path.basename(item['path'])}", h3_style))
+                            add_image(item['image_with_points_path'], 'Image with Sample Points', width=4*inch)
+                            
+                            color_details = item.get('color_details', [])
+                            if color_details:
+                                story.append(Paragraph("Sampled Colors:", body_style))
+                                color_table_data = [['Palette', 'HSV', 'BGR', 'RGB', 'HEX']]
+                                for detail in color_details:
+                                    try:
+                                        palette_img = Image(base_dir / detail['palette_path'], width=0.5*inch, height=0.5*inch)
+                                        color_table_data.append([
+                                            palette_img,
+                                            Paragraph(detail['hsv'], code_style),
+                                            Paragraph(detail['bgr'], code_style),
+                                            Paragraph(detail['rgb'], code_style),
+                                            Paragraph(detail['hex'], code_style)
+                                        ])
+                                    except Exception:
+                                        color_table_data.append(['(Img Fail)', detail['hsv'], detail['bgr'], detail['rgb'], detail['hex']])
+                                
+                                color_tbl = Table(color_table_data, colWidths=[0.7*inch, 1.5*inch, 1.5*inch, 1.5*inch, 1.3*inch])
+                                color_tbl.setStyle(TableStyle([
+                                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                                    ('GRID', (0,0), (-1,-1), 1, colors.black),
+                                    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                                ]))
+                                story.append(color_tbl)
+                            story.append(Spacer(1, 0.2*inch))
+    
+            doc.build(story)
+            if self.debug_mode:
+                print(f"ReportLab PDF report saved to {pdf_path}")
     def generate_report(self, analysis_results: dict, metadata: dict, debug_data: dict = None, external_pdf_path: str = None, masked_image_path: str = None, logo_path: Path = None):
         """
         Generates all specified report files (HTML, PDF) from the analysis results.
@@ -582,17 +790,20 @@ class ReportGenerator:
         shutil.copy(analysis_results['original_image_path'], orig_img_path)
 
         final_logo_path = ""
-        # Define the absolute path to the correct global logo
-        true_logo_path = config.DATA_DIR / "logo" / "logo.png"
+        # Prioritize the project-specific logo if provided, otherwise fall back to the global one.
+        path_to_use = logo_path if logo_path and logo_path.is_file() else config.DATA_DIR / "logo" / "logo.png"
 
-        if true_logo_path.is_file():
-            # The destination for the logo is inside the 'reporting' subfolder
-            logo_dest = reporting_dir / true_logo_path.name
-            shutil.copy(true_logo_path, logo_dest)
-            # The final path in the report must be relative to the report's root directory
-            final_logo_path = os.path.relpath(logo_dest, self.project_output_dir)
+        if path_to_use.is_file():
+            try:
+                # The destination for the logo is inside the 'reporting' subfolder
+                logo_dest = reporting_dir / path_to_use.name
+                shutil.copy(path_to_use, logo_dest)
+                # The final path in the report must be relative to the report's root directory
+                final_logo_path = os.path.relpath(logo_dest, self.project_output_dir)
+            except Exception as e:
+                print(f"[WARNING] Failed to copy logo from {path_to_use}: {e}")
         else:
-            print(f"[WARNING] Global logo not found at '{true_logo_path}'")
+            print(f"[WARNING] Logo file not found at '{path_to_use}'")
 
         processed_dataset_info, dataset_color_space_plot_path = None, None
         if debug_data and 'dataset_debug_info' in debug_data:
